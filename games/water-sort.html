@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>分离流沙 · 瓶子倒水</title>
+<!-- 公共存档模块（game-hub） -->
+<script src="../save.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #14161f; color: #e8eaf0;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  #game { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: pointer; }
+
+  /* 顶部 HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px;
+    background: rgba(20, 22, 31, 0.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  #hud a.back {
+    color: #e8eaf0; text-decoration: none;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+    padding: 6px 12px; border-radius: 999px; font-size: 13px;
+    transition: background .15s;
+  }
+  #hud a.back:hover { background: rgba(255,255,255,0.16); }
+  #hud .title { font-weight: 700; letter-spacing: 1px; margin-right: 4px; }
+  .chip { font-size: 13px; opacity: 0.85; padding: 6px 10px; }
+  .pill {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); color: #e8eaf0;
+    padding: 6px 13px; border-radius: 999px; font-size: 13px; cursor: pointer;
+    transition: background .15s;
+  }
+  .pill:hover { background: rgba(255,255,255,0.16); }
+  .pill:active { transform: scale(0.96); }
+  .pill.primary { background: rgba(80,170,255,0.18); border-color: rgba(80,170,255,0.5); }
+  .pill.primary:hover { background: rgba(80,170,255,0.3); }
+  .pill:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+
+  #hint {
+    position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; z-index: 5;
+    font-size: 12px; color: rgba(255,255,255,0.42);
+  }
+
+  /* 胜利弹窗 */
+  #winOverlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55);
+  }
+  #winOverlay.hidden { display: none; }
+  .card {
+    background: #20253a; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px;
+    padding: 28px 42px; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: pop .25s ease-out;
+  }
+  @keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .card h2 { margin: 0 0 8px; font-size: 26px; }
+  .card p { margin: 0 0 18px; color: rgba(255,255,255,0.7); }
+  .card button { font-size: 15px; padding: 9px 22px; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <a class="back" href="../index.html">← 返回大厅</a>
+  <span class="title">🍾 分离流沙</span>
+  <span class="chip" id="levelLabel"></span>
+  <span class="chip" id="moveLabel"></span>
+  <span class="chip" id="bestLabel"></span>
+  <button class="pill" id="undoBtn">↩ 撤销</button>
+  <button class="pill" id="restartBtn">⟲ 重开</button>
+  <button class="pill primary" id="nextBtn">下一关 ▶</button>
+</div>
+<canvas id="game"></canvas>
+<div id="hint">点击瓶子选中 · 再点目标瓶倒水 · 同色才能相融 · 装满同色自动封盖</div>
+
+<div id="winOverlay" class="hidden">
+  <div class="card">
+    <h2 id="winTitle">🎉 过关！</h2>
+    <p id="winText"></p>
+    <button class="pill primary" id="winNext">下一关</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ================= 常量 ================= */
+const COLORS = {
+  0:'#e74c3c', 1:'#3498db', 2:'#2ecc71', 3:'#f1c40f',
+  4:'#9b59b6', 5:'#e67e22', 6:'#1abc9c', 7:'#e84393'
+};
+// 瓶子几何（逻辑像素，会按屏幕整体缩放）
+const GEO = { bodyW:64, bodyH:150, neckW:40, neckH:22, lipH:7, lipW:50, inset:5, capH:8 };
+const totalH = GEO.lipH + GEO.neckH + GEO.bodyH;
+
+// 关卡配置：颜色数 / 瓶容量 / 空瓶数 / 随机种子（固定种子保证每关刷新不变）
+const LEVELS = [
+  { colors:2, capacity:4, empty:1, seed:101 },
+  { colors:2, capacity:4, empty:1, seed:102 },
+  { colors:3, capacity:4, empty:1, seed:103 },
+  { colors:3, capacity:4, empty:1, seed:104 },
+  { colors:3, capacity:4, empty:2, seed:105 },
+  { colors:4, capacity:4, empty:2, seed:106 },
+  { colors:4, capacity:4, empty:2, seed:107 },
+  { colors:4, capacity:4, empty:2, seed:108 },
+  { colors:5, capacity:4, empty:2, seed:109 },
+  { colors:5, capacity:4, empty:2, seed:110 },
+];
+
+/* ================= 存档（接入 game-hub/save.js，key: "water-sort"） =================
+   顶层字段：best(最短步数,number|null)、completed(已通关数 0-10)、currentLevel(当前关卡索引) */
+const SAVE_DEFAULTS = { best: null, completed: 0, currentLevel: 0 };
+const save = window.GameSave ? window.GameSave.load('water-sort', SAVE_DEFAULTS)
+                             : Object.assign({}, SAVE_DEFAULTS);
+function persist(){
+  if(!window.GameSave) return;
+  window.GameSave.save('water-sort', save);
+}
+
+/* ================= DOM ================= */
+const cvs = document.getElementById('game');
+const ctx = cvs.getContext('2d');
+const winOverlay = document.getElementById('winOverlay');
+
+/* ================= 游戏状态 ================= */
+const state = {
+  levelIndex: 0, capacity: 4,
+  bottles: [], initial: [], moves: 0, history: [], selected: -1,
+  positions: [], view: { scale: 1, offX: 0, offY: 0 }
+};
+let dpr = 1;
+let anim = null;      // {i,k,color,amount,srcBefore,dstBefore,dir,t0,dur,t}
+let flash = null;     // 错误闪烁
+let winVisible = false;
+
+/* ================= 伪随机（可复现关卡） ================= */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ================= 纯逻辑（状态 + 合法性 + 胜利） ================= */
+function topBlock(bottle){
+  if(!bottle.length) return { color:-1, size:0 };
+  const color = bottle[bottle.length-1];
+  let size = 0;
+  for(let j = bottle.length-1; j >= 0 && bottle[j] === color; j--) size++;
+  return { color, size };
+}
+function canPour(bottles, i, k){
+  if(i === k) return false;
+  const src = bottles[i], dst = bottles[k];
+  if(!src.length) return false;                      // 源瓶空
+  if(dst.length >= state.capacity) return false;      // 目标满
+  const tb = topBlock(src);
+  return dst.length === 0 || dst[dst.length-1] === tb.color; // 空瓶 或 顶层同色
+}
+function doPour(bottles, i, k, cap){
+  const src = bottles[i], dst = bottles[k];
+  const tb = topBlock(src);
+  const space = cap - dst.length;
+  const n = Math.min(tb.size, space);
+  for(let x = 0; x < n; x++){ src.pop(); dst.push(tb.color); }
+  return n;
+}
+function isSolved(bottles, cap){
+  return bottles.every(b => {
+    if(!b.length) return true;
+    return b.length === cap && b.every(c => c === b[0]);
+  });
+}
+// 把瓶子数组拍平成「颜色段」列表，供绘制用；动画期间允许小数高度
+function segmentsOf(bottle){
+  const segs = [];
+  for(const c of bottle){
+    const last = segs[segs.length-1];
+    if(last && last.color === c) last.units++;
+    else segs.push({ color:c, units:1 });
+  }
+  return segs;
+}
+function segSum(segs){ return segs.reduce((a,s) => a + s.units, 0); }
+
+/* ================= BFS 求解器（用于关卡可解性校验） ================= */
+function isSolvable(start, cap, nodeLimit){
+  const key = b => b.map(x => x.join(',')).join('|');
+  if(isSolved(start, cap)) return true;
+  const seen = new Set([key(start)]);
+  const q = [start.map(x => x.slice())];
+  let nodes = 0;
+  while(q.length){
+    if(++nodes > nodeLimit) return false;      // 超出预算视为不可解，重新生成
+    const cur = q.shift();
+    for(let i = 0; i < cur.length; i++){
+      const src = cur[i];
+      if(!src.length) continue;
+      const tb = topBlock(src);
+      for(let k = 0; k < cur.length; k++){
+        if(i === k) continue;
+        const dst = cur[k];
+        if(dst.length >= cap) continue;
+        if(dst.length && dst[dst.length-1] !== tb.color) continue;
+        const n = Math.min(tb.size, cap - dst.length);
+        // 先只构造新状态 key（不复制整表，省内存）
+        const parts = [];
+        for(let j = 0; j < cur.length; j++){
+          if(j === i) parts.push(src.slice(0, src.length - n).join(','));
+          else if(j === k) parts.push(dst.concat(Array(n).fill(tb.color)).join(','));
+          else parts.push(cur[j].join(','));
+        }
+        const kk = parts.join('|');
+        if(seen.has(kk)) continue;
+        const nb = cur.map(x => x.slice());
+        const s = nb[i], d = nb[k];
+        for(let x = 0; x < n; x++){ s.pop(); d.push(tb.color); }
+        if(isSolved(nb, cap)) return true;
+        seen.add(kk);
+        q.push(nb);
+      }
+    }
+  }
+  return false;
+}
+
+/* ================= 关卡生成（随机分布 + 求解器验证，保证可解） =================
+   先把所有色块打乱，随机分进瓶子，再用 BFS 确认可解、且非「已通关」状态。 */
+function generateLevel(cfg, attempt){
+  if(attempt === undefined) attempt = 0;
+  const rng = mulberry32(cfg.seed + attempt * 13);
+  const cap = cfg.capacity;
+
+  // 打乱全部色块
+  const units = [];
+  for(let c = 0; c < cfg.colors; c++) for(let x = 0; x < cap; x++) units.push(c);
+  for(let i = units.length - 1; i > 0; i--){
+    const j = Math.floor(rng() * (i + 1));
+    const t = units[i]; units[i] = units[j]; units[j] = t;
+  }
+
+  // 随机分装进前 colors 个瓶（每瓶 1..cap 个），其余留空
+  const total = cfg.colors * cap;
+  const bottles = [];
+  let idx = 0;
+  for(let b = 0; b < cfg.colors; b++){
+    const remBottles = cfg.colors - b;
+    const min = Math.max(1, total - idx - (remBottles - 1) * cap);
+    const max = Math.min(cap, total - idx - (remBottles - 1));
+    const count = min + Math.floor(rng() * (max - min + 1));
+    bottles.push(units.slice(idx, idx + count));
+    idx += count;
+  }
+  for(let e = 0; e < cfg.empty; e++) bottles.push([]);
+
+  // 质量门槛：非「已通关」且可解
+  if(isSolved(bottles, cap)) return generateLevel(cfg, attempt + 1);
+  if(!isSolvable(bottles, cap, 120000)) return generateLevel(cfg, attempt + 1);
+  return bottles;
+}
+
+/* ================= 关卡控制 ================= */
+function loadLevel(){
+  const cfg = LEVELS[state.levelIndex];
+  state.capacity = cfg.capacity;
+  state.bottles = generateLevel(cfg);
+  state.initial = state.bottles.map(b => b.slice());
+  state.moves = 0; state.history = []; state.selected = -1; anim = null; flash = null;
+  hideWin();
+  layout(); updateHud();
+  save.currentLevel = state.levelIndex;   // 记录当前关卡
+  persist();
+}
+function restart(){
+  state.bottles = state.initial.map(b => b.slice());
+  state.moves = 0; state.history = []; state.selected = -1; anim = null; flash = null;
+  hideWin(); updateHud();
+}
+function nextLevel(){
+  // 顺序解锁：仅当前关已通关且非最后一关时才可进入下一关
+  if(!(state.levelIndex < save.completed && state.levelIndex < LEVELS.length - 1)) return;
+  state.levelIndex = state.levelIndex + 1;
+  loadLevel();
+}
+function undo(){
+  if(anim || !state.history.length) return;
+  const snap = state.history.pop();
+  state.bottles = snap.bottles;
+  state.moves = snap.moves;
+  state.selected = -1;
+  hideWin(); updateHud();
+}
+
+/* ================= 布局（整体缩放适配屏幕） ================= */
+function resize(){
+  dpr = window.devicePixelRatio || 1;
+  cvs.width  = Math.floor(window.innerWidth  * dpr);
+  cvs.height = Math.floor(window.innerHeight * dpr);
+  cvs.style.width  = window.innerWidth  + 'px';
+  cvs.style.height = window.innerHeight + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  layout();
+}
+function layout(){
+  const W = cvs.width / dpr, H = cvs.height / dpr;
+  const n = state.bottles.length;
+  if(n === 0){ state.view = { scale:1, offX:0, offY:0 }; state.positions = []; return; }
+  const slotW = GEO.bodyW + 30, slotH = totalH + 56;
+  const cols = Math.min(n, Math.max(1, Math.floor((W - 40) / slotW)));
+  const rows = Math.ceil(n / cols);
+  const gridW = cols * slotW, gridH = rows * slotH;
+  const scale = Math.min(1, (W - 40) / gridW, (H - 150) / gridH);
+  state.view = { scale, offX:(W - gridW*scale)/2, offY:(H - gridH*scale)/2 };
+  state.positions = state.bottles.map((b, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    return { x: (col + 0.5) * slotW, y: row * slotH + slotH - 26 };
+  });
+}
+
+/* ================= 绘制工具 ================= */
+function roundRect(ctx, x, y, w, h, r){
+  r = Math.min(r, w/2, h/2);
+  if(r < 0) r = 0;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function bezier(p0, p1, p2, p3, tt){
+  const u = 1 - tt;
+  return {
+    x: u*u*u*p0.x + 3*u*u*tt*p1.x + 3*u*tt*tt*p2.x + tt*tt*tt*p3.x,
+    y: u*u*u*p0.y + 3*u*u*tt*p1.y + 3*u*tt*tt*p2.y + tt*tt*tt*p3.y
+  };
+}
+function easeInOut(t){ return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
+
+/* 画一个瓶子。bx,by 是瓶底中心（逻辑坐标）。o: {selected, done, tilt, flash} */
+function drawBottle(ctx, bx, by, segs, o){
+  o = o || {};
+  const bodyW=GEO.bodyW, bodyH=GEO.bodyH, neckW=GEO.neckW, neckH=GEO.neckH,
+        lipH=GEO.lipH, lipW=GEO.lipW, inset=GEO.inset, capH=GEO.capH;
+  const lift = o.selected ? 16 : 0;
+  const topY = by - totalH - lift;
+  const bodyTop = topY + lipH + neckH;
+  const bodyBottom = bodyTop + bodyH;
+  const cx = bx;
+
+  // 地面阴影（选中时影子变小、下沉）
+  ctx.fillStyle = o.selected ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.30)';
+  ctx.beginPath();
+  ctx.ellipse(cx, by + (o.selected ? 14 : 5), bodyW * 0.42, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 倒水时围绕瓶口轻微倾斜
+  const pivotY = topY;
+  ctx.save();
+  if(o.tilt){
+    ctx.translate(cx, pivotY);
+    ctx.rotate(o.tilt);
+    ctx.translate(-cx, -pivotY);
+  }
+
+  // —— 液体 ——
+  const interiorX = cx - bodyW/2 + inset;
+  const interiorW = bodyW - 2*inset;
+  const liquidBottom = bodyBottom;
+  const liquidMaxTop = bodyTop + capH;
+  const unitH = (liquidBottom - liquidMaxTop) / state.capacity;
+  let curBottom = liquidBottom;
+  for(let s = 0; s < segs.length; s++){
+    const seg = segs[s];
+    const segH = seg.units * unitH;
+    const segTop = curBottom - segH;
+    roundRect(ctx, interiorX, segTop, interiorW, curBottom - segTop, s === 0 ? 7 : 2);
+    ctx.fillStyle = COLORS[seg.color] || '#888';
+    ctx.fill();
+    curBottom = segTop;
+  }
+  // 液面高光
+  if(segs.length && curBottom < liquidBottom){
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    roundRect(ctx, interiorX, curBottom - 1, interiorW, 2.5, 1.2);
+    ctx.fill();
+  }
+
+  // —— 玻璃瓶身 ——
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.40)';
+  ctx.lineWidth = 2;
+  roundRect(ctx, cx - bodyW/2, bodyTop, bodyW, bodyH, 12);
+  ctx.fill(); ctx.stroke();
+  // 瓶颈
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(cx - neckW/2, bodyTop);
+  ctx.lineTo(cx - neckW/2, bodyTop - neckH);
+  ctx.lineTo(cx + neckW/2, bodyTop - neckH);
+  ctx.lineTo(cx + neckW/2, bodyTop);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // 瓶口
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1.8;
+  roundRect(ctx, cx - lipW/2, topY, lipW, lipH, 3);
+  ctx.fill(); ctx.stroke();
+  // 玻璃高光
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  roundRect(ctx, cx - bodyW/2 + 7, bodyTop + 9, 7, bodyH - 18, 3);
+  ctx.fill();
+  // 已完成 → 封盖（仅视觉提示，仍可倒出）
+  if(o.done){
+    ctx.fillStyle = COLORS[segs[0].color] || '#888';
+    roundRect(ctx, cx - lipW/2 - 2, topY - 9, lipW + 4, 10, 3);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 选中光圈（不随倾斜）
+  if(o.selected){
+    ctx.strokeStyle = 'rgba(130,220,255,0.9)';
+    ctx.lineWidth = 2.5;
+    roundRect(ctx, cx - bodyW/2 - 7, topY - 5, bodyW + 14, totalH + 10, 18);
+    ctx.stroke();
+  }
+  // 非法操作红色闪烁
+  if(o.flash){
+    ctx.strokeStyle = 'rgba(255,80,80,0.85)';
+    ctx.lineWidth = 2.5;
+    roundRect(ctx, cx - bodyW/2 - 7, topY - 5, bodyW + 14, totalH + 10, 18);
+    ctx.stroke();
+  }
+}
+
+/* 倒水流束 */
+function drawStream(ctx, anim){
+  const p = state.positions;
+  const sx = p[anim.i].x, sy = p[anim.i].y - totalH;   // 源瓶口
+  const dx = p[anim.k].x, dy = p[anim.k].y - totalH;   // 目标瓶口
+  const c1 = { x: sx, y: sy + 34 }, c2 = { x: dx, y: dy - 34 };
+  const color = COLORS[anim.color] || '#888';
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = color; ctx.globalAlpha = 0.9; ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, dx, dy); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.globalAlpha = 0.65; ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  // 下落水珠
+  for(const f of [0.3, 0.6]){
+    const pt = bezier({ x: sx, y: sy }, c1, c2, { x: dx, y: dy }, f);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y + (1 - anim.t) * 14, 3.6 * (1 - 0.4 * anim.t), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* 生成当前帧每瓶的绘制段（动画期间源/目标做平滑插值） */
+function buildSegArrays(){
+  const arr = [];
+  for(let i = 0; i < state.bottles.length; i++){
+    let segs = segmentsOf(state.bottles[i]);
+    if(anim){
+      if(i === anim.i){
+        segs = segmentsOf(anim.srcBefore);
+        const top = segs.pop();
+        const rem = top.units * (1 - anim.t);
+        if(rem > 0.03) segs.push({ color: top.color, units: rem });
+      } else if(i === anim.k){
+        segs = segmentsOf(anim.dstBefore);
+        const extra = anim.amount * anim.t;
+        if(extra > 0.03) segs.push({ color: anim.color, units: extra });
+      }
+    }
+    arr.push(segs);
+  }
+  return arr;
+}
+
+/* ================= 渲染主循环 ================= */
+function render(now){
+  const W = cvs.width / dpr, H = cvs.height / dpr;
+  // 背景
+  const g = ctx.createRadialGradient(W/2, H*0.35, 0, W/2, H*0.5, Math.max(W, H) * 0.8);
+  g.addColorStop(0, '#232840'); g.addColorStop(1, '#14161f');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  const segsArr = buildSegArrays();
+  ctx.save();
+  ctx.translate(state.view.offX, state.view.offY);
+  ctx.scale(state.view.scale, state.view.scale);
+
+  for(let i = 0; i < state.bottles.length; i++){
+    const p = state.positions[i];
+    let dx = 0;
+    if(flash && flash.idx === i){
+      const dt = now - flash.t0;
+      if(dt < 450) dx = Math.sin(dt / 28) * 5;
+      else flash = null;
+    }
+    const segs = segsArr[i];
+    const done = segs.length === 1 && Math.round(segSum(segs)) === state.capacity;
+    const tilt = (anim && i === anim.i) ? 0.16 * anim.t * anim.dir : 0;
+    drawBottle(ctx, p.x + dx, p.y, segs, {
+      selected: i === state.selected,
+      done: done,
+      tilt: tilt,
+      flash: !!(flash && flash.idx === i)
+    });
+  }
+  if(anim) drawStream(ctx, anim);
+  ctx.restore();
+}
+
+function frame(now){
+  if(anim){
+    const t = Math.min(1, (now - anim.t0) / anim.dur);
+    anim.t = easeInOut(t);
+    if(t >= 1){
+      anim = null;
+      if(isSolved(state.bottles, state.capacity)) showWin();
+    }
+  }
+  render(now);
+  requestAnimationFrame(frame);
+}
+
+/* ================= 交互 ================= */
+function hitTest(mx, my){
+  const v = state.view;
+  const bx = (mx - v.offX) / v.scale, by = (my - v.offY) / v.scale;
+  for(let i = state.positions.length - 1; i >= 0; i--){
+    const p = state.positions[i];
+    if(bx >= p.x - GEO.bodyW/2 - 8 && bx <= p.x + GEO.bodyW/2 + 8 &&
+       by >= p.y - totalH - 18 && by <= p.y + 8) return i;
+  }
+  return -1;
+}
+
+function onPointer(e){
+  if(anim || winVisible) return;
+  const rect = cvs.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const idx = hitTest(mx, my);
+  if(idx < 0) return;
+
+  // 未选中 → 选中一个非空瓶
+  if(state.selected === -1){
+    if(state.bottles[idx].length) state.selected = idx;
+    return;
+  }
+  // 再点同一瓶 → 取消选中
+  if(state.selected === idx){ state.selected = -1; return; }
+
+  const i = state.selected, k = idx;
+  if(canPour(state.bottles, i, k)){
+    const srcBefore = state.bottles[i].slice();
+    const dstBefore = state.bottles[k].slice();
+    const tb = topBlock(srcBefore);
+    state.history.push({ bottles: state.bottles.map(b => b.slice()), moves: state.moves });
+    const amount = doPour(state.bottles, i, k, state.capacity);
+    state.moves++;
+    state.selected = -1;
+    const dir = state.positions[k].x >= state.positions[i].x ? 1 : -1;
+    anim = { i, k, color: tb.color, amount, srcBefore, dstBefore, dir,
+             t0: performance.now(), dur: 280, t: 0 };
+    updateHud();
+  } else {
+    flash = { idx: i, t0: performance.now() };
+  }
+}
+
+/* ================= HUD ================= */
+function updateHud(){
+  document.getElementById('levelLabel').textContent = '第 ' + (state.levelIndex + 1) + ' / ' + LEVELS.length + ' 关';
+  document.getElementById('moveLabel').textContent = '步数 ' + state.moves;
+  document.getElementById('bestLabel').textContent = (save.best == null) ? '最佳 --' : '最佳 ' + save.best + ' 步';
+  updateNextButton();
+}
+function updateNextButton(){
+  // 顺序解锁：下一关仅当「当前关已通关」且「非最后一关」时可用
+  const canNext = state.levelIndex < save.completed && state.levelIndex < LEVELS.length - 1;
+  document.getElementById('nextBtn').disabled = !canNext;
+}
+function showWin(){
+  winVisible = true;
+  const last = state.levelIndex === LEVELS.length - 1;
+  document.getElementById('winTitle').textContent = last ? '🎉 全部通关！' : '🎉 过关！';
+  document.getElementById('winText').textContent = '用了 ' + state.moves + ' 步完成本关';
+  document.getElementById('winNext').textContent = last ? '再来一轮' : '下一关';
+  // 写入存档：completed 取已通关最大关卡数，best 取最小步数
+  save.completed = Math.max(save.completed, state.levelIndex + 1);
+  save.best = (save.best == null) ? state.moves : Math.min(save.best, state.moves);
+  save.currentLevel = (state.levelIndex + 1) % LEVELS.length;
+  persist();
+  updateHud();
+  winOverlay.classList.remove('hidden');
+}
+function hideWin(){
+  winVisible = false;
+  winOverlay.classList.add('hidden');
+}
+
+/* ================= 启动 ================= */
+document.getElementById('undoBtn').addEventListener('click', undo);
+document.getElementById('restartBtn').addEventListener('click', restart);
+document.getElementById('nextBtn').addEventListener('click', nextLevel);
+document.getElementById('winNext').addEventListener('click', function(){
+  // 最后一关按钮为「再来一轮」→ 重玩本关；其余按顺序解锁进入下一关
+  if(state.levelIndex === LEVELS.length - 1) restart();
+  else nextLevel();
+});
+cvs.addEventListener('pointerdown', onPointer);
+window.addEventListener('resize', resize);
+resize();
+// 顺序解锁：恢复时夹取到 [0, min(9, completed)]，completed=0 时强制从第 1 关开始
+const maxUnlocked = Math.min(LEVELS.length - 1, Math.max(0, Number(save.completed) || 0));
+state.levelIndex = Math.max(0, Math.min(Number(save.currentLevel) || 0, maxUnlocked));
+loadLevel();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
