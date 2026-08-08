@@ -10,13 +10,11 @@ game-hub/
 ├── save.js                 # 公共存档模块（版本化 localStorage 封装）
 ├── games/
 │   ├── water-sort.html     # 瓶子倒水 · 50 关
-│   ├── sudoku.html         # 数独 · 10 关
-│   └── tape-peel.html      # 撕胶带（层层撕）· 5 关
+│   └── sudoku.html         # 数独 · 10 关
 ├── tools/
 │   ├── gen-water-sort-levels.js   # 瓶子倒水关卡离线生成器（50→500 关扩展入口）
 │   ├── verify-water-sort.js       # 瓶子倒水关卡全量校验
-│   ├── solve-water-sort.js        # 求解工具：输出指定关卡解法步骤
-│   └── verify-tape-peel.js        # 撕胶带关卡校验（可解/难度/边界）
+│   └── solve-water-sort.js        # 求解工具：输出指定关卡解法步骤
 └── README.md
 ```
 

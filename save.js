@@ -3,7 +3,7 @@
  * 统一 localStorage 封装，key 格式：game-hub:<gameId>:v1
  *
  * 约定：每个游戏的存档对象顶层需包含
- *   best: number | null    最佳表现，可选（数值越小越好；如 sudoku/tape-peel=最快用时秒）
+ *   best: number | null    最佳表现，可选（数值越小越好；如 sudoku=最快用时秒）
  *   completed: number      已通关的关卡数
  * 大厅页 (index.html) 读取这两个字段展示纪录。
  */
