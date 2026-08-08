@@ -13,7 +13,8 @@ game-hub/
 │   └── sudoku.html         # 数独 · 10 关
 ├── tools/
 │   ├── gen-water-sort-levels.js   # 分离流沙关卡离线生成器（50→500 关扩展入口）
-│   └── verify-water-sort.js       # 分离流沙关卡全量校验
+│   ├── verify-water-sort.js       # 分离流沙关卡全量校验
+│   └── solve-water-sort.js        # 求解工具：输出指定关卡解法步骤
 └── README.md
 ```
 
