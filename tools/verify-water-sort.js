@@ -16,35 +16,12 @@ const m = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!m) { console.error('no script'); process.exit(1); }
 const js = m[1];
 
-// ---- DOM/Canvas 桩 ----
-const ctxStub = new Proxy({}, {
-  get(t, p) {
-    if (p === 'createRadialGradient' || p === 'createLinearGradient') return () => ({ addColorStop() {} });
-    return () => {};
-  },
-  set() { return true; }
-});
-const elStub = new Proxy({}, {
-  get(t, p) {
-    if (p === 'classList') return { add() {}, remove() {} };
-    if (p === 'style') return {};
-    if (p === 'textContent') return '';
-    if (p === 'getContext') return () => ctxStub;
-    if (p === 'width') return 800;
-    if (p === 'height') return 600;
-    if (p === 'addEventListener') return () => {};
-    return undefined;
-  },
-  set() { return true; }
-});
-global.document = { getElementById: () => elStub };
-global.window = { devicePixelRatio: 1, innerWidth: 800, innerHeight: 600, addEventListener() {} };
-global.requestAnimationFrame = () => {};
-global.performance = { now: () => 1000 };
+// ---- DOM/Canvas 桩（共享 _dom_stub，补齐 location/localStorage 等） ----
+const stub = require('./_dom_stub');
 
-const fn = new Function('document', 'window', 'requestAnimationFrame', 'performance',
+const fn = new Function('document', 'window', 'requestAnimationFrame', 'performance', 'location', 'localStorage',
   js + '; return {LEVELS, topBlock, doPour, isSolved, state};');
-const api = fn(global.document, global.window, global.requestAnimationFrame, global.performance);
+const api = fn(stub.document, stub.window, stub.requestAnimationFrame, stub.performance, stub.location, stub.localStorage);
 
 // ---- BFS 求解：返回完整解法路径（null=无解/超限） ----
 // 层序 BFS，nodeLimit 在每层结束后检查（与离线 gen 脚本的 solveSteps 语义一致，

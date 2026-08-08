@@ -57,6 +57,54 @@
       desc: "填入 1-9，使每行每列每宫不重复",
       total: 10,
       bestText: function (v) { return v == null ? "—" : formatTime(v); }
+    },
+    {
+      id: "2048", name: "2048", emoji: "🎮", href: "games/2048.html",
+      desc: "滑动数字方块，两两合并成更大的数",
+      total: 10,
+      bestText: function (v) { return v == null || v === 0 ? "—" : "最高分 " + v; }
+    },
+    {
+      id: "minesweeper", name: "扫雷", emoji: "💣", href: "games/minesweeper.html",
+      desc: "翻开方块，避开地雷，用数字推理",
+      total: 10,
+      bestText: function (v) { return v == null ? "—" : formatTime(v); }
+    },
+    {
+      id: "lights-out", name: "熄灯", emoji: "💡", href: "games/lights-out.html",
+      desc: "点击方格翻转十字灯，把所有灯熄灭",
+      total: 10,
+      bestText: function (v) { return v == null ? "—" : (v <= 0 ? "达成最优" : "超最优 " + v + " 次"); }
+    },
+    {
+      id: "puzzle-15", name: "15 拼图", emoji: "🔢", href: "games/puzzle-15.html",
+      desc: "滑动方块，把数字按顺序排好",
+      total: 10,
+      bestText: function (v) { return v == null ? "—" : (v <= 0 ? "达成最优" : "超最优 " + v + " 步"); }
+    },
+    {
+      id: "mastermind", name: "猜数字", emoji: "🎯", href: "games/mastermind.html",
+      desc: "根据黑白反馈破译隐藏的颜色密码",
+      total: 10,
+      bestText: function (v) { return v == null ? "—" : "最少 " + v + " 次猜中"; }
+    },
+    {
+      id: "nonogram", name: "数织", emoji: "🖼️", href: "games/nonogram.html",
+      desc: "按行列数字提示，推理涂出隐藏图案",
+      total: 12,
+      bestText: null
+    },
+    {
+      id: "pipes", name: "水管连接", emoji: "🔧", href: "games/pipes.html",
+      desc: "旋转管道，让所有水路接通成一个网络",
+      total: 12,
+      bestText: null
+    },
+    {
+      id: "rush-hour", name: "华容道·塞车", emoji: "🚗", href: "games/rush-hour.html",
+      desc: "滑动车辆腾出通道，让红色小车驶出",
+      total: 12,
+      bestText: function (v) { return v == null ? "—" : (v <= 0 ? "达成最优" : "超最优 " + v + " 步"); }
     }
   ];
 

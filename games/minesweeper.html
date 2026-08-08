@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>扫雷 · 轻量游戏合集</title>
+<!-- 公共存档模块（game-hub） -->
+<script src="../save.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(160deg, #1e293b, #0f172a);
+    min-height: 100vh; color: #e2e8f0;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 20px 12px 40px;
+    user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  header {
+    width: min(92vw, 480px); margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; flex-wrap: wrap;
+  }
+  .back { color: #94a3b8; text-decoration: none; font-size: 15px; }
+  .back:hover { color: #7dd3fc; }
+  .title { font-weight: 700; letter-spacing: 1px; font-size: 16px; }
+  .top { display: flex; align-items: center; gap: 12px; font-size: 14px; flex-wrap: wrap; }
+  #levelLabel { color: #e2e8f0; letter-spacing: 1px; }
+  #mineLabel { color: #fbbf24; font-variant-numeric: tabular-nums; }
+  #timer { color: #7dd3fc; font-variant-numeric: tabular-nums; }
+
+  #controls {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    width: min(92vw, 480px); margin-bottom: 12px;
+  }
+  #controls button {
+    flex: 1; min-width: 88px; padding: 10px 0; font-size: 15px;
+    border-radius: 999px; border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.07); color: #e2e8f0; cursor: pointer;
+  }
+  #controls button:hover:not(:disabled) { background: rgba(255,255,255,.14); }
+  #controls button:disabled { opacity: .35; cursor: default; }
+
+  #board {
+    display: grid; width: min(94vw, 460px);
+    border: 3px solid #64748b; border-radius: 8px; overflow: hidden;
+    background: #0f172a;
+  }
+  .cell {
+    display: flex; align-items: center; justify-content: center;
+    aspect-ratio: 1 / 1;
+    font-size: clamp(11px, 4.2vw, 20px); font-weight: 700;
+    color: #e2e8f0; cursor: pointer;
+    background: #1e293b;
+    border-right: 1px solid #334155; border-bottom: 1px solid #334155;
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+  }
+  .cell.nright { border-right: none; }
+  .cell.nbottom { border-bottom: none; }
+  .cell.revealed { background: #334155; cursor: default; }
+  .cell.mine { background: #7f1d1d; }
+  .cell.boom { background: #dc2626; }
+  .cell.wrongflag { background: #7f1d1d; }
+
+  .hint { margin-top: 16px; font-size: 12.5px; color: #64748b; text-align: center; line-height: 1.8; }
+
+  #modal {
+    position: fixed; inset: 0; z-index: 10;
+    background: rgba(2, 6, 23, .72);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #modal.hidden { display: none; }
+  .modal-box {
+    background: #1e293b; border: 1px solid rgba(255,255,255,.12);
+    border-radius: 14px; padding: 26px 30px; text-align: center;
+    max-width: 360px; width: 88%;
+  }
+  .modal-box h2 { font-size: 1.55rem; margin-bottom: 10px; }
+  .modal-box p { color: #94a3b8; margin: 6px 0; font-size: 15px; }
+  .modal-box p.win-time { color: #7dd3fc; }
+  .modal-box .actions { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+  .modal-box button {
+    flex: 1; padding: 11px 0; font-size: 15px; cursor: pointer;
+    border-radius: 999px; border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.08); color: #e2e8f0;
+  }
+  .modal-box button.primary { background: #0284c7; border-color: #0284c7; color: #fff; font-weight: 600; }
+  .modal-box button:hover { filter: brightness(1.12); }
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="../index.html">← 返回大厅</a>
+  <span class="title">💣 扫雷</span>
+  <div class="top">
+    <span id="levelLabel">第 1 / 10 关</span>
+    <span id="mineLabel">💣 0</span>
+    <span id="timer">00:00</span>
+  </div>
+</header>
+
+<div id="controls">
+  <button id="prevBtn">上一关</button>
+  <button id="restartBtn">重开本关</button>
+  <button id="nextBtn">下一关</button>
+</div>
+
+<main id="board"></main>
+
+<div class="hint">左键翻开 · 右键 / 长按插旗 · 数字表示周围雷数</div>
+
+<div id="modal" class="hidden">
+  <div class="modal-box">
+    <h2 id="modalTitle">🎉 过关！</h2>
+    <p class="win-time" id="modalTime"></p>
+    <div class="actions">
+      <button id="modalReplayBtn">重玩本关</button>
+      <button id="modalNextBtn" class="primary">下一关 →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ================= 常量 ================= */
+// 10 关难度递增：行 / 列 / 雷数 / 固定种子（布雷确定性）
+const TOTAL = 10;
+const LEVELS = [
+  { r: 9,  c: 9,  mines: 8,  seed: 5001 },
+  { r: 9,  c: 9,  mines: 10, seed: 5002 },
+  { r: 12, c: 12, mines: 15, seed: 5003 },
+  { r: 12, c: 12, mines: 20, seed: 5004 },
+  { r: 14, c: 14, mines: 25, seed: 5005 },
+  { r: 14, c: 14, mines: 30, seed: 5006 },
+  { r: 16, c: 16, mines: 35, seed: 5007 },
+  { r: 16, c: 16, mines: 40, seed: 5008 },
+  { r: 16, c: 16, mines: 45, seed: 5009 },
+  { r: 18, c: 18, mines: 55, seed: 5010 }
+];
+
+// 数字着色（深色主题适配：7 用浅色替代黑色保证可读）
+const NUM_COLORS = { 1: "#60a5fa", 2: "#4ade80", 3: "#f87171", 4: "#818cf8", 5: "#d97706", 6: "#22d3ee", 7: "#f8fafc", 8: "#94a3b8" };
+
+// 存档模块兜底（save.js 缺失时游戏仍可离线玩）
+const GameSave = window.GameSave || {
+  load: function (id, d) { return d || {}; },
+  save: function () { return false; }
+};
+
+/* ================= DOM 引用 ================= */
+const boardEl = document.getElementById("board");
+const levelLabel = document.getElementById("levelLabel");
+const mineLabel = document.getElementById("mineLabel");
+const timerEl = document.getElementById("timer");
+
+/* ================= 游戏状态 ================= */
+const state = {
+  r: 9, c: 9, mineCount: 8, seed: 5001,
+  board: null,     // 首点后由 genBoard 生成：{mines:Set, nums:Int8Array, r, c}
+  revealed: [],    // 布尔：是否已翻开
+  flags: [],       // 布尔：是否插旗
+  started: false,  // 是否已首点（首点前不布雷）
+  over: false,
+  won: false,
+  boomIdx: -1      // 踩中的雷格索引
+};
+let currentLevel = 0;
+let best = null;       // 历史最快通关秒数（越小越好）
+let completed = 0;     // 已通关数（顺序解锁）
+let cells = [];
+let startTime = 0;
+let timerId = null;
+let longPress = { idx: -1, t: 0 }; // 长按插旗后抑制随后触发的 click
+
+/* ================= 纯逻辑（供 verify 导出） ================= */
+// mulberry32：固定种子的确定性伪随机数生成器
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// 生成布雷盘面：首点及其 8 邻域不布雷（首点安全）；
+// 若排除后剩余可放格不足 mines 个，则扩一圈邻域重试（保持确定性）。
+function genBoard(r, c, mines, seed, firstRow, firstCol) {
+  const total = r * c;
+  const mineSet = new Set();
+  const rng = mulberry32(seed);
+  let radius = 1;
+  while (true) {
+    const exclude = new Set();
+    for (let dr = -radius; dr <= radius; dr++) {
+      for (let dc = -radius; dc <= radius; dc++) {
+        const nr = firstRow + dr, nc = firstCol + dc;
+        if (nr < 0 || nr >= r || nc < 0 || nc >= c) continue;
+        exclude.add(nr * c + nc);
+      }
+    }
+    if (total - exclude.size < mines) { radius++; continue; }
+    // 拒绝采样布雷：跳过首点安全区与已布雷格
+    let placed = 0;
+    while (placed < mines) {
+      const idx = Math.floor(rng() * total);
+      if (exclude.has(idx) || mineSet.has(idx)) continue;
+      mineSet.add(idx);
+      placed++;
+    }
+    break;
+  }
+  // 计算邻雷数：nums[i] = -1 为雷，否则为邻雷数
+  const nums = new Int8Array(total);
+  for (const idx of mineSet) nums[idx] = -1;
+  for (let i = 0; i < total; i++) {
+    if (mineSet.has(i)) continue;
+    const rr = Math.floor(i / c), cc = i % c;
+    let n = 0;
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        const nr = rr + dr, nc = cc + dc;
+        if (nr < 0 || nr >= r || nc < 0 || nc >= c) continue;
+        if (mineSet.has(nr * c + nc)) n++;
+      }
+    }
+    nums[i] = n;
+  }
+  return { mines: mineSet, nums: nums, r: r, c: c };
+}
+
+// 翻开：flood-fill 展开空白区。踩雷返回 {mine: idx}，否则返回新翻开集合 Set<idx>。
+function reveal(board, idx) {
+  if (board.mines.has(idx)) return { mine: idx };
+  const out = new Set();
+  const stack = [idx];
+  while (stack.length) {
+    const i = stack.pop();
+    if (out.has(i) || board.mines.has(i)) continue;
+    out.add(i);
+    if (board.nums[i] === 0) {
+      const rr = Math.floor(i / board.c), cc = i % board.c;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = rr + dr, nc = cc + dc;
+          if (nr < 0 || nr >= board.r || nc < 0 || nc >= board.c) continue;
+          stack.push(nr * board.c + nc);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/* ================= 存档 ================= */
+const saved = GameSave.load("minesweeper", { best: null, completed: 0, currentLevel: 0 });
+if (typeof saved.best === "number") best = saved.best;
+if (typeof saved.completed === "number") completed = saved.completed;
+currentLevel = Math.min(Math.max(saved.currentLevel || 0, 0), TOTAL - 1);
+if (currentLevel > completed) currentLevel = completed; // 顺序解锁夹取到 [0, min(TOTAL-1, completed)]
+
+function saveProgress() {
+  GameSave.save("minesweeper", { best: best, completed: completed, currentLevel: currentLevel });
+}
+
+/* ================= 计时器 ================= */
+function fmt(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
+function resetTimer() {
+  if (timerId) clearInterval(timerId);
+  timerId = null;
+  timerEl.textContent = "00:00";
+}
+function startTimer() {
+  if (timerId) clearInterval(timerId);
+  startTime = Date.now();
+  timerEl.textContent = "00:00";
+  timerId = setInterval(function () {
+    timerEl.textContent = fmt(Math.floor((Date.now() - startTime) / 1000));
+  }, 250);
+}
+function stopTimer() {
+  if (timerId) clearInterval(timerId);
+  timerId = null;
+}
+function elapsedSeconds() {
+  return Math.max(1, Math.floor((Date.now() - startTime) / 1000));
+}
+
+/* ================= 关卡控制 ================= */
+function loadLevel(idx) {
+  currentLevel = idx;
+  const cfg = LEVELS[idx];
+  state.r = cfg.r; state.c = cfg.c; state.mineCount = cfg.mines; state.seed = cfg.seed;
+  state.board = null;
+  state.revealed = new Array(cfg.r * cfg.c).fill(false);
+  state.flags = new Array(cfg.r * cfg.c).fill(false);
+  state.started = false; state.over = false; state.won = false; state.boomIdx = -1;
+  resetTimer();
+  hideModal();
+  buildBoard();
+  updateHud();
+  saveProgress();
+}
+
+function restart() { loadLevel(currentLevel); }
+function goPrev() { loadLevel(Math.max(currentLevel - 1, 0)); }
+function goNext() { loadLevel(Math.min(currentLevel + 1, TOTAL - 1)); }
+
+/* ================= 棋盘构建 ================= */
+function buildBoard() {
+  boardEl.innerHTML = "";
+  cells = [];
+  boardEl.style.gridTemplateColumns = "repeat(" + state.c + ", 1fr)";
+  const r = state.r, c = state.c;
+  for (let i = 0; i < r * c; i++) {
+    const div = document.createElement("div");
+    div.className = "cell";
+    if (i % c === c - 1) div.classList.add("nright");
+    if (Math.floor(i / c) === r - 1) div.classList.add("nbottom");
+    (function (idx) {
+      div.addEventListener("click", function () { onReveal(idx); });
+      div.addEventListener("contextmenu", function (e) { e.preventDefault(); onFlag(idx); });
+      // 移动端长按（~300ms）插旗；滚动/提前抬起则取消
+      let lpTimer = null;
+      div.addEventListener("touchstart", function () {
+        if (state.over) return;
+        lpTimer = setTimeout(function () { onFlag(idx); suppressClick(idx); }, 300);
+      }, { passive: true });
+      div.addEventListener("touchmove", function () { if (lpTimer) clearTimeout(lpTimer); });
+      div.addEventListener("touchend", function () { if (lpTimer) clearTimeout(lpTimer); });
+      div.addEventListener("touchcancel", function () { if (lpTimer) clearTimeout(lpTimer); });
+    })(i);
+    boardEl.appendChild(div);
+    cells.push(div);
+  }
+  render();
+}
+
+function suppressClick(idx) {
+  longPress = { idx: idx, t: Date.now() };
+}
+
+/* ================= 渲染 ================= */
+function render() {
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    cell.classList.remove("revealed", "mine", "boom", "wrongflag");
+    cell.style.color = "#e2e8f0";
+    if (state.revealed[i]) {
+      cell.classList.add("revealed");
+      if (state.over && state.board && state.board.mines.has(i)) {
+        // 失败时亮出所有雷，踩中的那格标 💥
+        cell.textContent = i === state.boomIdx ? "💥" : "💣";
+        cell.classList.add(i === state.boomIdx ? "boom" : "mine");
+      } else {
+        const n = state.board ? state.board.nums[i] : 0;
+        cell.textContent = n > 0 ? n : "";
+        if (n > 0) cell.style.color = NUM_COLORS[n] || "#e2e8f0";
+      }
+    } else if (state.flags[i]) {
+      cell.textContent = "🚩";
+      cell.style.color = "#f87171";
+      if (state.over && state.board && !state.board.mines.has(i)) {
+        cell.classList.add("wrongflag");
+        cell.textContent = "✖";
+      }
+    } else {
+      cell.textContent = "";
+    }
+  }
+  updateHud();
+}
+
+function updateMineLabel() {
+  let flagCount = 0;
+  for (let i = 0; i < state.flags.length; i++) if (state.flags[i]) flagCount++;
+  mineLabel.textContent = "💣 " + (state.mineCount - flagCount);
+}
+
+function updateButtons() {
+  document.getElementById("prevBtn").disabled = currentLevel <= 0;
+  document.getElementById("nextBtn").disabled = !(currentLevel < TOTAL - 1 && currentLevel < completed);
+}
+
+function updateHud() {
+  levelLabel.textContent = "第 " + (currentLevel + 1) + " / " + TOTAL + " 关";
+  updateMineLabel();
+  updateButtons();
+}
+
+/* ================= 交互 ================= */
+function onReveal(idx) {
+  // 长按插旗后触发的 click 抑制
+  if (longPress.idx === idx && Date.now() - longPress.t < 700) {
+    longPress = { idx: -1, t: 0 };
+    return;
+  }
+  if (state.over) return;
+  if (state.revealed[idx]) return;
+  if (state.flags[idx]) return;
+
+  // 首点：此刻才布雷（首点安全），并开始计时
+  if (!state.started) {
+    state.started = true;
+    const fr = Math.floor(idx / state.c), fc = idx % state.c;
+    state.board = genBoard(state.r, state.c, state.mineCount, state.seed, fr, fc);
+    startTimer();
+  }
+
+  const res = reveal(state.board, idx);
+  if (res && res.mine !== undefined) {
+    // 踩雷：亮出所有雷，停止计时
+    state.over = true;
+    state.boomIdx = res.mine;
+    stopTimer();
+    for (const mi of state.board.mines) state.revealed[mi] = true;
+    render();
+    showLose();
+    return;
+  }
+  res.forEach(function (i) { state.revealed[i] = true; });
+  render();
+  checkWin();
+}
+
+function onFlag(idx) {
+  if (state.over) return;
+  if (state.revealed[idx]) return;
+  state.flags[idx] = !state.flags[idx];
+  render();
+}
+
+/* ================= 胜利 / 失败 ================= */
+function checkWin() {
+  let revealedCount = 0;
+  for (let i = 0; i < state.revealed.length; i++) if (state.revealed[i]) revealedCount++;
+  if (revealedCount === state.r * state.c - state.mineCount) {
+    state.over = true;
+    state.won = true;
+    stopTimer();
+    const t = elapsedSeconds();
+    if (best == null || t < best) best = t;
+    completed = Math.max(completed, currentLevel + 1);
+    // 过关后存档推进到下一关
+    GameSave.save("minesweeper", {
+      best: best,
+      completed: completed,
+      currentLevel: Math.min(currentLevel + 1, TOTAL - 1)
+    });
+    showWin(t);
+  }
+}
+
+/* ================= 弹窗 ================= */
+function hideModal() {
+  document.getElementById("modal").classList.add("hidden");
+}
+function showWin(t) {
+  const isLast = currentLevel === TOTAL - 1;
+  document.getElementById("modalTitle").textContent = isLast ? "🏆 全部通关！" : "🎉 过关！";
+  document.getElementById("modalTime").textContent = "本关用时 " + fmt(t) + " · 最佳 " + (best == null ? "—" : fmt(best));
+  document.getElementById("modalReplayBtn").textContent = "重玩本关";
+  document.getElementById("modalNextBtn").textContent = "下一关 →";
+  document.getElementById("modalNextBtn").style.display = isLast ? "none" : "";
+  document.getElementById("modal").classList.remove("hidden");
+}
+function showLose() {
+  document.getElementById("modalTitle").textContent = "💥 踩雷了";
+  document.getElementById("modalTime").textContent = "本关雷区已全部亮出，再试一次";
+  document.getElementById("modalReplayBtn").textContent = "再试一次";
+  document.getElementById("modalNextBtn").style.display = "none";
+  document.getElementById("modal").classList.remove("hidden");
+}
+
+/* ================= 事件绑定 ================= */
+document.getElementById("prevBtn").addEventListener("click", goPrev);
+document.getElementById("restartBtn").addEventListener("click", restart);
+document.getElementById("nextBtn").addEventListener("click", goNext);
+
+document.getElementById("modalReplayBtn").addEventListener("click", function () {
+  hideModal();
+  restart();
+});
+document.getElementById("modalNextBtn").addEventListener("click", function () {
+  hideModal();
+  goNext();
+});
+
+/* ================= 启动 ================= */
+loadLevel(currentLevel);
+
+/* ================= 导出（供 verify 使用，纯逻辑无 DOM） ================= */
+window.__game = { LEVELS: LEVELS, mulberry32: mulberry32, genBoard: genBoard, reveal: reveal };
+</script>
+</body>
+</html>

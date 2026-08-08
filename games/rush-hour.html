@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>华容道·塞车</title>
+<!-- 公共存档模块（game-hub） -->
+<script src="../save.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #14161f; color: #e8eaf0;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  #game { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: pointer; }
+
+  /* 顶部 HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px;
+    background: rgba(20, 22, 31, 0.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  #hud a.back {
+    color: #e8eaf0; text-decoration: none;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+    padding: 6px 12px; border-radius: 999px; font-size: 13px;
+    transition: background .15s;
+  }
+  #hud a.back:hover { background: rgba(255,255,255,0.16); }
+  #hud .title { font-weight: 700; letter-spacing: 1px; margin-right: 4px; }
+  .chip { font-size: 13px; opacity: 0.85; padding: 6px 10px; }
+  .pill {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); color: #e8eaf0;
+    padding: 6px 13px; border-radius: 999px; font-size: 13px; cursor: pointer;
+    transition: background .15s;
+  }
+  .pill:hover { background: rgba(255,255,255,0.16); }
+  .pill:active { transform: scale(0.96); }
+  .pill.primary { background: rgba(80,170,255,0.18); border-color: rgba(80,170,255,0.5); }
+  .pill.primary:hover { background: rgba(80,170,255,0.3); }
+  .pill:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+
+  #hint {
+    position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; z-index: 5;
+    font-size: 12px; color: rgba(255,255,255,0.42);
+    padding: 0 12px; pointer-events: none;
+  }
+
+  /* 胜利弹窗 / 选关弹窗 */
+  #winOverlay, #levelOverlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55);
+  }
+  #winOverlay.hidden, #levelOverlay.hidden { display: none; }
+  .card {
+    background: #20253a; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px;
+    padding: 28px 42px; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: pop .25s ease-out;
+  }
+  .card-scroll { max-height: 78vh; overflow-y: auto; padding: 22px 26px; }
+  #levelGrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+    gap: 8px; max-width: 380px; margin: 16px auto;
+  }
+  #levelGrid button {
+    aspect-ratio: 1 / 1; border-radius: 10px; border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.06); color: #e8eaf0; font-size: 14px; cursor: pointer;
+    transition: background .12s, transform .08s;
+  }
+  #levelGrid button:hover:not(.locked) { background: rgba(255,255,255,0.16); }
+  #levelGrid button.done { background: rgba(46,204,113,0.20); border-color: rgba(46,204,113,0.45); }
+  #levelGrid button.cur { outline: 2px solid rgba(130,220,255,0.9); }
+  #levelGrid button.locked { opacity: 0.38; cursor: default; }
+  @keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .card h2 { margin: 0 0 8px; font-size: 26px; }
+  .card p { margin: 0 0 18px; color: rgba(255,255,255,0.7); }
+  .card button { font-size: 15px; padding: 9px 22px; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <a class="back" href="../index.html">← 返回大厅</a>
+  <span class="title">🚗 华容道·塞车</span>
+  <span class="chip" id="levelLabel"></span>
+  <span class="chip" id="moveLabel"></span>
+  <span class="chip" id="devBadge" style="display:none; color:#ffd166; background:rgba(255,209,102,0.12); border:1px solid rgba(255,209,102,0.45);">DEV</span>
+  <button class="pill" id="prevBtn">◀ 上一关</button>
+  <button class="pill" id="restartBtn">⟲ 重开</button>
+  <button class="pill" id="hintBtn">💡 提示</button>
+  <button class="pill" id="levelsBtn">🗺 选关</button>
+  <button class="pill primary" id="nextBtn">下一关 ▶</button>
+</div>
+<canvas id="game"></canvas>
+<div id="hint">拖拽车辆沿其方向滑动 · 让红色小车驶向右出口</div>
+
+<div id="winOverlay" class="hidden">
+  <div class="card">
+    <h2 id="winTitle">🎉 过关！</h2>
+    <p id="winText"></p>
+    <button class="pill primary" id="winNext">下一关</button>
+  </div>
+</div>
+
+<div id="levelOverlay" class="hidden">
+  <div class="card card-scroll">
+    <h2>选择关卡</h2>
+    <div id="levelGrid"></div>
+    <div style="display:flex; justify-content:center; gap:10px; margin-top:14px;">
+      <button class="pill" id="devToggle">🔧 开发者模式：关</button>
+      <button class="pill" id="levelClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ================= 关卡表（离线固化，tools/gen-rush-hour.js 生成） ================= */
+const LEVELS = [
+  { size:6, minSteps:2, seed:6310, cars:[{red:1,r:2,c:1,len:2,v:0},{r:4,c:1,len:3,v:0},{r:4,c:4,len:2,v:1},{r:2,c:3,len:2,v:1},{r:4,c:5,len:2,v:1},{r:0,c:0,len:2,v:0},{r:0,c:4,len:2,v:1},{r:5,c:0,len:3,v:0},{r:0,c:5,len:2,v:1},{r:3,c:0,len:3,v:0}] },
+  { size:6, minSteps:2, seed:106048, cars:[{red:1,r:2,c:2,len:2,v:0},{r:5,c:1,len:3,v:0},{r:4,c:1,len:3,v:0},{r:0,c:1,len:2,v:0},{r:2,c:4,len:3,v:1},{r:3,c:2,len:2,v:0},{r:0,c:4,len:2,v:1},{r:1,c:0,len:2,v:0},{r:4,c:5,len:2,v:1},{r:0,c:3,len:2,v:1}] },
+  { size:6, minSteps:2, seed:207751, cars:[{red:1,r:2,c:1,len:2,v:0},{r:2,c:3,len:3,v:1},{r:0,c:0,len:2,v:1},{r:3,c:0,len:3,v:0},{r:5,c:4,len:2,v:0},{r:1,c:3,len:3,v:0},{r:4,c:4,len:2,v:0},{r:0,c:3,len:2,v:0},{r:5,c:0,len:2,v:0},{r:1,c:1,len:2,v:0}] },
+  { size:6, minSteps:4, seed:305655, cars:[{red:1,r:2,c:1,len:2,v:0},{r:2,c:4,len:3,v:1},{r:1,c:0,len:3,v:1},{r:0,c:1,len:2,v:0},{r:1,c:4,len:2,v:0},{r:0,c:3,len:3,v:0},{r:2,c:5,len:3,v:1},{r:1,c:1,len:2,v:0},{r:5,c:3,len:2,v:0},{r:3,c:3,len:2,v:1}] },
+  { size:6, minSteps:4, seed:421637, cars:[{red:1,r:2,c:1,len:2,v:0},{r:3,c:3,len:3,v:1},{r:5,c:1,len:2,v:0},{r:1,c:1,len:2,v:0},{r:3,c:4,len:2,v:1},{r:3,c:2,len:2,v:1},{r:1,c:4,len:2,v:1},{r:0,c:4,len:2,v:0},{r:0,c:0,len:2,v:0},{r:4,c:5,len:2,v:1},{r:1,c:5,len:2,v:1}] },
+  { size:6, minSteps:4, seed:505917, cars:[{red:1,r:2,c:0,len:2,v:0},{r:5,c:2,len:2,v:0},{r:3,c:4,len:2,v:0},{r:0,c:4,len:2,v:0},{r:0,c:2,len:2,v:0},{r:4,c:5,len:2,v:1},{r:1,c:3,len:3,v:1},{r:1,c:2,len:3,v:1},{r:0,c:1,len:2,v:1},{r:0,c:0,len:2,v:1},{r:3,c:1,len:2,v:1}] },
+  { size:6, minSteps:5, seed:605393, cars:[{red:1,r:2,c:3,len:2,v:0},{r:1,c:2,len:2,v:1},{r:1,c:3,len:3,v:0},{r:4,c:5,len:2,v:1},{r:4,c:1,len:3,v:0},{r:0,c:0,len:3,v:1},{r:2,c:5,len:2,v:1},{r:3,c:0,len:2,v:0},{r:0,c:3,len:3,v:0},{r:4,c:4,len:2,v:1}] },
+  { size:6, minSteps:5, seed:706310, cars:[{red:1,r:2,c:0,len:2,v:0},{r:2,c:5,len:2,v:1},{r:1,c:4,len:2,v:1},{r:0,c:3,len:3,v:1},{r:2,c:2,len:2,v:1},{r:4,c:0,len:2,v:1},{r:5,c:4,len:2,v:0},{r:0,c:0,len:2,v:0},{r:5,c:1,len:2,v:0},{r:3,c:4,len:2,v:1},{r:1,c:0,len:3,v:0}] },
+  { size:6, minSteps:6, seed:809716, cars:[{red:1,r:2,c:0,len:2,v:0},{r:3,c:1,len:3,v:0},{r:0,c:4,len:3,v:1},{r:3,c:0,len:3,v:1},{r:4,c:2,len:2,v:0},{r:2,c:5,len:2,v:1},{r:1,c:3,len:2,v:1},{r:1,c:0,len:3,v:0},{r:5,c:3,len:2,v:0},{r:0,c:1,len:3,v:0}] },
+  { size:6, minSteps:7, seed:910109, cars:[{red:1,r:2,c:0,len:2,v:0},{r:2,c:3,len:2,v:1},{r:3,c:5,len:2,v:1},{r:2,c:4,len:3,v:1},{r:5,c:1,len:3,v:0},{r:1,c:2,len:3,v:0},{r:2,c:2,len:2,v:1},{r:0,c:1,len:2,v:0},{r:3,c:0,len:2,v:0},{r:4,c:1,len:3,v:0}] },
+  { size:6, minSteps:8, seed:1012074, cars:[{red:1,r:2,c:0,len:2,v:0},{r:2,c:4,len:3,v:1},{r:0,c:3,len:2,v:0},{r:3,c:0,len:2,v:0},{r:3,c:3,len:3,v:1},{r:1,c:2,len:3,v:1},{r:4,c:1,len:2,v:0},{r:2,c:5,len:3,v:1},{r:5,c:4,len:2,v:0},{r:0,c:1,len:2,v:1}] },
+  { size:6, minSteps:10, seed:1109585, cars:[{red:1,r:2,c:0,len:2,v:0},{r:1,c:2,len:2,v:1},{r:3,c:4,len:2,v:0},{r:0,c:0,len:3,v:0},{r:4,c:3,len:3,v:0},{r:3,c:0,len:3,v:1},{r:0,c:5,len:2,v:1},{r:1,c:3,len:2,v:1},{r:1,c:0,len:2,v:0},{r:0,c:3,len:2,v:0}] }
+];
+const SIZE = 6;
+
+/* ================= 纯逻辑（verify 依赖这些导出，与 tools/gen-rush-hour.js 同实现） ================= */
+function isWin(cars, size) {
+  const red = cars.find(c => c.red === 1);
+  if (!red) return false;
+  return red.c === size - 2;
+}
+function overlaps(cars, idx, nr, nc) {
+  const c = cars[idx];
+  const len = c.len, v = c.v;
+  for (let j = 0; j < cars.length; j++) {
+    if (j === idx) continue;
+    const jc = cars[j];
+    for (let a = 0; a < jc.len; a++) {
+      const jr = jc.v === 0 ? jc.r : jc.r + a;
+      const jcC = jc.v === 0 ? jc.c + a : jc.c;
+      for (let b = 0; b < len; b++) {
+        const cr = v === 0 ? nr : nr + b;
+        const cc = v === 0 ? nc + b : nc;
+        if (cr === jr && cc === jcC) return true;
+      }
+    }
+  }
+  return false;
+}
+function slideCars(cars, size, carIdx) {
+  const c = cars[carIdx];
+  const out = [];
+  if (c.v === 0) {
+    for (let dc = 1; c.c - dc >= 0; dc++) {
+      if (!overlaps(cars, carIdx, c.r, c.c - dc)) out.push({ r: c.r, c: c.c - dc });
+      else break;
+    }
+    for (let dc = 1; ; dc++) {
+      if (c.c + dc + c.len <= size && !overlaps(cars, carIdx, c.r, c.c + dc)) {
+        out.push({ r: c.r, c: c.c + dc });
+      } else break;
+    }
+  } else {
+    for (let dr = 1; c.r - dr >= 0; dr++) {
+      if (!overlaps(cars, carIdx, c.r - dr, c.c)) out.push({ r: c.r - dr, c: c.c });
+      else break;
+    }
+    for (let dr = 1; ; dr++) {
+      if (c.r + dr + c.len <= size && !overlaps(cars, carIdx, c.r + dr, c.c)) {
+        out.push({ r: c.r + dr, c: c.c });
+      } else break;
+    }
+  }
+  return out;
+}
+function moveCar(cars, size, carIdx, newC, newR) {
+  return cars.map((x, i) => {
+    if (i !== carIdx) return Object.assign({}, x);
+    return Object.assign({}, x, { r: newR, c: newC });
+  });
+}
+function carRange(cars, size, carIdx) {
+  const c = cars[carIdx];
+  let min = c.v === 0 ? c.c : c.r;
+  let max = min;
+  for (const p of slideCars(cars, size, carIdx)) {
+    if (c.v === 0) { if (p.c < min) min = p.c; if (p.c > max) max = p.c; }
+    else { if (p.r < min) min = p.r; if (p.r > max) max = p.r; }
+  }
+  return { min, max };
+}
+function solveBFS(cars, size, nodeLimit) {
+  if (nodeLimit === undefined || nodeLimit === null) nodeLimit = 300000;
+  const key = cs => cs.map(x => x.r * size + x.c).join('|');
+  const start = cars.map(x => Object.assign({}, x));
+  if (isWin(start, size)) return 0;
+  const seen = new Set([key(start)]);
+  let q = [start];
+  let steps = 0;
+  while (q.length) {
+    steps++;
+    const next = [];
+    for (let si = 0; si < q.length; si++) {
+      const cur = q[si];
+      for (let i = 0; i < cur.length; i++) {
+        const opts = slideCars(cur, size, i);
+        for (let oi = 0; oi < opts.length; oi++) {
+          const p = opts[oi];
+          const nb = moveCar(cur, size, i, p.c, p.r);
+          const k = key(nb);
+          if (seen.has(k)) continue;
+          if (isWin(nb, size)) return steps;
+          seen.add(k);
+          next.push(nb);
+        }
+      }
+    }
+    if (seen.size > nodeLimit) return null;
+    q = next;
+  }
+  return null;
+}
+
+/* ================= 存档（key: "rush-hour"） =================
+   顶层字段：completed(已通关数)、currentLevel(当前关)、best(超最优步数，越小越好，0=达成最优) */
+var GameSave = window.GameSave || { load: function (g, d) { return Object.assign({}, d); }, save: function () { return false; } };
+const SAVE_DEFAULTS = { completed: 0, currentLevel: 0, best: null };
+const save = GameSave.load('rush-hour', SAVE_DEFAULTS);
+function persist() {
+  GameSave.save('rush-hour', save);
+}
+
+/* ================= 开发者模式 ================= */
+const DEV_KEY = 'game-hub:rush-hour:dev';
+let devMode = new URLSearchParams(location.search).get('dev') === '1';
+if (!devMode) {
+  try { devMode = localStorage.getItem(DEV_KEY) === '1'; } catch (e) {}
+}
+function setDevMode(on) {
+  devMode = on;
+  try { localStorage.setItem(DEV_KEY, on ? '1' : '0'); } catch (e) {}
+  updateDevUI();
+  if (!levelOverlay.classList.contains('hidden')) openLevels();
+}
+function updateDevUI() {
+  const badge = document.getElementById('devBadge');
+  if (badge) badge.style.display = devMode ? 'inline-block' : 'none';
+  const t = document.getElementById('devToggle');
+  if (t) {
+    t.textContent = devMode ? '🔧 开发者模式：开' : '🔧 开发者模式：关';
+    t.classList.toggle('primary', devMode);
+  }
+  updateNextButton();
+}
+
+/* ================= DOM / 常量 ================= */
+const cvs = document.getElementById('game');
+const ctx = cvs.getContext('2d');
+const winOverlay = document.getElementById('winOverlay');
+const levelOverlay = document.getElementById('levelOverlay');
+const DEFAULT_HINT = '拖拽车辆沿其方向滑动 · 让红色小车驶向右出口';
+const RED_COLOR = '#e74c3c';
+const PALETTE = ['#4a9eda', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#e84393', '#00cec9', '#fd79a8', '#6c5ce7', '#fdcb6e', '#74b9ff'];
+
+/* ================= 游戏状态 ================= */
+const state = {
+  levelIndex: 0,
+  cars: [], initial: [], moves: 0,
+  dragging: null,          // {carIdx, startC, startR, startMX, startMY, min, max, curC, curR}
+  hintFlash: 0,
+  view: { cell: 30, offX: 0, offY: 0 }
+};
+let dpr = 1;
+let winVisible = false;
+let hintTimer = null;
+
+/* ================= 关卡控制 ================= */
+function carColor(i) {
+  return state.cars[i].red === 1 ? RED_COLOR : PALETTE[(i - 1) % PALETTE.length];
+}
+function loadLevel() {
+  const cfg = LEVELS[state.levelIndex];
+  state.cars = cfg.cars.map(c => Object.assign({}, c));
+  state.initial = cfg.cars.map(c => Object.assign({}, c));
+  state.moves = 0; state.dragging = null;
+  hideWin();
+  layout(); updateHud();
+  save.currentLevel = state.levelIndex;
+  persist();
+}
+function restart() {
+  state.cars = state.initial.map(c => Object.assign({}, c));
+  state.moves = 0; state.dragging = null;
+  hideWin(); updateHud();
+}
+function nextLevel() {
+  if (state.levelIndex >= LEVELS.length - 1) return;
+  if (!devMode && !(state.levelIndex < save.completed)) return;
+  state.levelIndex = state.levelIndex + 1;
+  loadLevel();
+}
+function prevLevel() {
+  if (state.levelIndex <= 0) return;
+  state.levelIndex = state.levelIndex - 1;
+  loadLevel();
+}
+function gotoLevel(i) {
+  state.levelIndex = i;
+  hideWin(); closeLevels(); loadLevel();
+}
+
+/* ================= 布局（整体缩放适配屏幕） ================= */
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  cvs.width  = Math.floor(window.innerWidth  * dpr);
+  cvs.height = Math.floor(window.innerHeight * dpr);
+  cvs.style.width  = window.innerWidth  + 'px';
+  cvs.style.height = window.innerHeight + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  layout();
+}
+function layout() {
+  const W = cvs.width / dpr, H = cvs.height / dpr;
+  const hudEl = document.getElementById('hud');
+  const hudH = hudEl ? Math.ceil(hudEl.getBoundingClientRect().height) : 60;
+  const bottomReserve = 40;
+  const availW = Math.max(1, W - 44);
+  const availH = Math.max(1, H - hudH - bottomReserve);
+  const cell = Math.max(20, Math.min(availW / SIZE, availH / SIZE, 64));
+  const boardPx = cell * SIZE;
+  state.view = {
+    cell,
+    offX: (W - boardPx) / 2,
+    offY: hudH + 10 + (availH - boardPx) / 2
+  };
+}
+
+/* ================= 绘制工具 ================= */
+function roundRect(c, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  if (r < 0) r = 0;
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+function carRect(car, preview) {
+  const v = state.view, cell = v.cell;
+  const r = preview ? state.dragging.curR : car.r;
+  const c = preview ? state.dragging.curC : car.c;
+  const pad = Math.max(2, cell * 0.05);
+  if (car.v === 0) {
+    return { x: v.offX + c * cell + pad, y: v.offY + r * cell + pad, w: car.len * cell - 2 * pad, h: cell - 2 * pad };
+  }
+  return { x: v.offX + c * cell + pad, y: v.offY + r * cell + pad, w: cell - 2 * pad, h: car.len * cell - 2 * pad };
+}
+function drawCar(c, car, idx, now, preview) {
+  const rect = carRect(car, preview);
+  const color = car.red === 1 ? RED_COLOR : PALETTE[(idx - 1) % PALETTE.length];
+  const isRed = car.red === 1;
+  const lift = preview ? 4 : 0;
+
+  // 阴影
+  c.fillStyle = 'rgba(0,0,0,0.30)';
+  roundRect(c, rect.x + 1, rect.y + 3 + lift, rect.w, rect.h, Math.min(10, rect.h * 0.3));
+  c.fill();
+
+  // 车身
+  c.fillStyle = color;
+  roundRect(c, rect.x, rect.y - lift, rect.w, rect.h, Math.min(10, rect.h * 0.3));
+  c.fill();
+
+  // 顶部高光
+  c.fillStyle = 'rgba(255,255,255,0.16)';
+  roundRect(c, rect.x + rect.w * 0.06, rect.y - lift + rect.h * 0.10, rect.w * 0.88, rect.h * 0.32, Math.min(8, rect.h * 0.25));
+  c.fill();
+
+  // 描边
+  c.strokeStyle = 'rgba(0,0,0,0.28)';
+  c.lineWidth = 1.5;
+  roundRect(c, rect.x, rect.y - lift, rect.w, rect.h, Math.min(10, rect.h * 0.3));
+  c.stroke();
+
+  // 红车提示闪烁 / 拖拽光圈
+  const flash = state.hintFlash && (now - state.hintFlash) < 2200;
+  if (isRed && (flash || preview)) {
+    const pulse = flash ? 0.6 + 0.4 * Math.sin((now - state.hintFlash) / 90) : 0.9;
+    c.strokeStyle = 'rgba(130,220,255,' + (0.55 * pulse).toFixed(3) + ')';
+    c.lineWidth = 2.5;
+    roundRect(c, rect.x - 4, rect.y - lift - 4, rect.w + 8, rect.h + 8, Math.min(14, rect.h * 0.4));
+    c.stroke();
+  }
+}
+
+/* ================= 渲染主循环 ================= */
+function render(now) {
+  const W = cvs.width / dpr, H = cvs.height / dpr;
+  const g = ctx.createRadialGradient(W / 2, H * 0.35, 0, W / 2, H * 0.5, Math.max(W, H) * 0.8);
+  g.addColorStop(0, '#232840'); g.addColorStop(1, '#14161f');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  const v = state.view, cell = v.cell;
+
+  // 网格底
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      ctx.fillRect(v.offX + c * cell, v.offY + r * cell, cell, cell);
+    }
+  }
+  // 网格线
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i <= SIZE; i++) {
+    ctx.moveTo(v.offX + i * cell, v.offY);
+    ctx.lineTo(v.offX + i * cell, v.offY + SIZE * cell);
+    ctx.moveTo(v.offX, v.offY + i * cell);
+    ctx.lineTo(v.offX + SIZE * cell, v.offY + i * cell);
+  }
+  ctx.stroke();
+
+  // 出口箭头（红车所在行，右边界外）
+  const red = state.cars.find(c => c.red === 1);
+  if (red) {
+    const ax = v.offX + SIZE * cell + Math.max(6, cell * 0.12);
+    const ay = v.offY + (red.r + 0.5) * cell;
+    const nearWin = red.c === SIZE - 3;
+    const pulse = 0.5 + 0.5 * Math.sin(now / (nearWin ? 140 : 280));
+    ctx.fillStyle = 'rgba(130,220,255,' + (0.4 + 0.4 * pulse).toFixed(3) + ')';
+    const s = cell * 0.18;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay - s);
+    ctx.lineTo(ax + s * 1.5, ay);
+    ctx.lineTo(ax, ay + s);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 车辆（拖拽的车最后画，浮在最上层）
+  const order = state.cars.map((_, i) => i);
+  if (state.dragging) {
+    const di = order.indexOf(state.dragging.carIdx);
+    if (di >= 0) { order.splice(di, 1); order.push(state.dragging.carIdx); }
+  }
+  for (const i of order) {
+    drawCar(ctx, state.cars[i], i, now, state.dragging && state.dragging.carIdx === i);
+  }
+}
+
+function frame(now) {
+  render(now);
+  requestAnimationFrame(frame);
+}
+
+/* ================= 交互 ================= */
+function hitTest(mx, my) {
+  const v = state.view, cell = v.cell;
+  const gr = Math.floor((my - v.offY) / cell);
+  const gc = Math.floor((mx - v.offX) / cell);
+  if (gr < 0 || gr >= SIZE || gc < 0 || gc >= SIZE) return -1;
+  for (let i = state.cars.length - 1; i >= 0; i--) {
+    const car = state.cars[i];
+    if (car.v === 0) {
+      if (car.r === gr && gc >= car.c && gc < car.c + car.len) return i;
+    } else {
+      if (car.c === gc && gr >= car.r && gr < car.r + car.len) return i;
+    }
+  }
+  return -1;
+}
+function onPointerDown(e) {
+  if (winVisible) return;
+  const rect = cvs.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const idx = hitTest(mx, my);
+  if (idx < 0) return;
+  const car = state.cars[idx];
+  const range = carRange(state.cars, SIZE, idx);
+  state.dragging = {
+    carIdx: idx, startC: car.c, startR: car.r,
+    startMX: mx, startMY: my,
+    min: range.min, max: range.max, curC: car.c, curR: car.r
+  };
+  try { cvs.setPointerCapture(e.pointerId); } catch (err) {}
+}
+function onPointerMove(e) {
+  if (!state.dragging) return;
+  const rect = cvs.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const d = state.dragging;
+  const car = state.cars[d.carIdx];
+  if (car.v === 0) {
+    const dc = Math.round((mx - d.startMX) / state.view.cell);
+    d.curC = Math.max(d.min, Math.min(d.max, d.startC + dc));
+  } else {
+    const dr = Math.round((my - d.startMY) / state.view.cell);
+    d.curR = Math.max(d.min, Math.min(d.max, d.startR + dr));
+  }
+}
+function onPointerUp(e) {
+  if (!state.dragging) return;
+  const d = state.dragging;
+  const car = state.cars[d.carIdx];
+  state.dragging = null;
+  let moved = false;
+  // clamp 保证落点必为合法位置；未位移则不算步
+  if (car.v === 0 && d.curC !== d.startC) {
+    state.cars = moveCar(state.cars, SIZE, d.carIdx, d.curC, d.startR);
+    state.moves++; moved = true;
+  } else if (car.v === 1 && d.curR !== d.startR) {
+    state.cars = moveCar(state.cars, SIZE, d.carIdx, d.startC, d.curR);
+    state.moves++; moved = true;
+  }
+  updateHud();
+  if (moved && isWin(state.cars, SIZE)) showWin();
+}
+function onPointerCancel() {
+  state.dragging = null;
+}
+
+/* ================= HUD ================= */
+function updateHud() {
+  document.getElementById('levelLabel').textContent = '第 ' + (state.levelIndex + 1) + ' / ' + LEVELS.length + ' 关';
+  document.getElementById('moveLabel').textContent = '步数 ' + state.moves;
+  updateNextButton();
+}
+function updateNextButton() {
+  const canNext = devMode ? state.levelIndex < LEVELS.length - 1
+                          : (state.levelIndex < save.completed && state.levelIndex < LEVELS.length - 1);
+  document.getElementById('nextBtn').disabled = !canNext;
+}
+function showWin() {
+  winVisible = true;
+  const lv = LEVELS[state.levelIndex];
+  const extra = Math.max(0, state.moves - lv.minSteps);
+  const last = state.levelIndex === LEVELS.length - 1;
+  document.getElementById('winTitle').textContent = last ? '🎉 全部通关！' : '🎉 过关！';
+  document.getElementById('winText').textContent =
+    '用了 ' + state.moves + ' 步完成本关 · ' + (extra === 0 ? '达成最优 🏆' : '超最优 ' + extra + ' 步');
+  document.getElementById('winNext').textContent = last ? '返回选关' : '下一关';
+  save.completed = Math.max(save.completed, state.levelIndex + 1);
+  save.currentLevel = state.levelIndex;
+  save.best = save.best == null ? extra : Math.min(save.best, extra);
+  persist();
+  updateHud();
+  winOverlay.classList.remove('hidden');
+}
+function hideWin() {
+  winVisible = false;
+  winOverlay.classList.add('hidden');
+}
+function hint() {
+  const lv = LEVELS[state.levelIndex];
+  state.hintFlash = performance.now();
+  const el = document.getElementById('hint');
+  el.textContent = '💡 本关最优 ' + lv.minSteps + ' 步 · 当前 ' + state.moves + ' 步 · 把红车滑到右侧出口';
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(function () {
+    if (!winVisible) document.getElementById('hint').textContent = DEFAULT_HINT;
+  }, 4000);
+}
+
+/* ================= 选关弹窗 ================= */
+function openLevels() {
+  const grid = document.getElementById('levelGrid');
+  grid.innerHTML = '';
+  const maxPlayable = devMode ? LEVELS.length - 1 : Math.max(state.levelIndex, save.completed);
+  for (let i = 0; i < LEVELS.length; i++) {
+    const b = document.createElement('button');
+    b.textContent = i + 1;
+    const unlocked = i <= maxPlayable;
+    if (!unlocked) { b.classList.add('locked'); b.textContent = '🔒'; }
+    if (i < save.completed) b.classList.add('done');
+    if (i === state.levelIndex) b.classList.add('cur');
+    if (unlocked) b.addEventListener('click', function () { gotoLevel(i); });
+    grid.appendChild(b);
+  }
+  levelOverlay.classList.remove('hidden');
+}
+function closeLevels() {
+  levelOverlay.classList.add('hidden');
+}
+
+/* ================= 启动 ================= */
+document.getElementById('prevBtn').addEventListener('click', prevLevel);
+document.getElementById('restartBtn').addEventListener('click', restart);
+document.getElementById('nextBtn').addEventListener('click', nextLevel);
+document.getElementById('hintBtn').addEventListener('click', hint);
+document.getElementById('levelsBtn').addEventListener('click', openLevels);
+document.getElementById('levelClose').addEventListener('click', closeLevels);
+document.getElementById('devToggle').addEventListener('click', function () { setDevMode(!devMode); });
+document.getElementById('winNext').addEventListener('click', function () {
+  if (state.levelIndex === LEVELS.length - 1) { hideWin(); openLevels(); }
+  else nextLevel();
+});
+cvs.addEventListener('pointerdown', onPointerDown);
+cvs.addEventListener('pointermove', onPointerMove);
+cvs.addEventListener('pointerup', onPointerUp);
+cvs.addEventListener('pointercancel', onPointerCancel);
+window.addEventListener('resize', resize);
+resize();
+// 顺序解锁：读档夹取到 [0, min(TOTAL-1, completed)]；开发者模式可进任意关
+const maxUnlocked = devMode ? LEVELS.length - 1
+                            : Math.min(LEVELS.length - 1, Math.max(0, Number(save.completed) || 0));
+state.levelIndex = Math.max(0, Math.min(Number(save.currentLevel) || 0, maxUnlocked));
+updateDevUI();
+loadLevel();
+requestAnimationFrame(frame);
+
+/* ================= 导出给 verify（纯函数 + 关卡表） ================= */
+window.__game = { LEVELS, slideCars, moveCar, isWin, solveBFS };
+</script>
+</body>
+</html>

@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>水管连接</title>
+<!-- 公共存档模块（game-hub） -->
+<script src="../save.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #14161f; color: #e8eaf0;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  #game { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: pointer; }
+
+  /* 顶部 HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px;
+    background: rgba(20, 22, 31, 0.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  #hud a.back {
+    color: #e8eaf0; text-decoration: none;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+    padding: 6px 12px; border-radius: 999px; font-size: 13px;
+    transition: background .15s;
+  }
+  #hud a.back:hover { background: rgba(255,255,255,0.16); }
+  #hud .title { font-weight: 700; letter-spacing: 1px; margin-right: 4px; }
+  .chip { font-size: 13px; opacity: 0.85; padding: 6px 10px; }
+  .pill {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); color: #e8eaf0;
+    padding: 6px 13px; border-radius: 999px; font-size: 13px; cursor: pointer;
+    transition: background .15s;
+  }
+  .pill:hover { background: rgba(255,255,255,0.16); }
+  .pill:active { transform: scale(0.96); }
+  .pill.primary { background: rgba(80,170,255,0.18); border-color: rgba(80,170,255,0.5); }
+  .pill.primary:hover { background: rgba(80,170,255,0.3); }
+  .pill:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+
+  #hint {
+    position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; z-index: 5;
+    font-size: 12px; color: rgba(255,255,255,0.42);
+  }
+
+  /* 胜利弹窗 */
+  #winOverlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55);
+  }
+  #winOverlay.hidden { display: none; }
+  .card {
+    background: #20253a; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px;
+    padding: 28px 42px; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: pop .25s ease-out;
+  }
+  @keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .card h2 { margin: 0 0 8px; font-size: 26px; }
+  .card p { margin: 0 0 18px; color: rgba(255,255,255,0.7); }
+  .card button { font-size: 15px; padding: 9px 22px; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <a class="back" href="../index.html">← 返回大厅</a>
+  <span class="title">🔧 水管连接</span>
+  <span class="chip" id="levelLabel"></span>
+  <span class="chip" id="moveLabel"></span>
+  <button class="pill" id="prevBtn">上一关</button>
+  <button class="pill" id="restartBtn">⟲ 重开</button>
+  <button class="pill primary" id="nextBtn">下一关 ▶</button>
+</div>
+<canvas id="game"></canvas>
+<div id="hint">点击管道旋转 90° · 让所有开口互相连通 · 从左上角铺向全盘即过关</div>
+
+<div id="winOverlay" class="hidden">
+  <div class="card">
+    <h2 id="winTitle">🎉 过关！</h2>
+    <p id="winText"></p>
+    <button class="pill primary" id="winNext">下一关</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ================= 关卡表（离线生成固化，见 tools/gen-pipes.js） =================
+   r/c = 网格尺寸；t = 每格类型（0直 1弯 2丁）；s = 每格目标旋转（一个全连通解）；
+   init = 每格初始旋转（打乱后的开局）。字符串行优先、按行分组便于阅读。 */
+const LEVELS = [
+  { r:5, c:5, t:"10201 01112 12210 11210 12111", s:"11112 01312 03130 12020 03303", init:"00001 03232 33021 02331 12203" },
+  { r:5, c:5, t:"12201 11012 10210 20022 10021", s:"11112 03012 11330 01112 01133", init:"00110 20123 00121 30033 31000" },
+  { r:6, c:6, t:"111021 221210 121110 122020 021122 111201", s:"121112 020130 032020 113120 002132 030313", init:"030102 332221 311330 013000 031033 211212" },
+  { r:6, c:6, t:"122021 211122 102200 110210 220122 122021", s:"111112 030202 011200 120030 020012 033133", init:"302102 031123 010200 201211 030220 333032" },
+  { r:6, c:6, t:"121121 000000 002210 112002 102122 102111", s:"112112 000000 000330 030112 112112 013303", init:"312000 100010 010030 223111 311320 101233" },
+  { r:7, c:7, t:"1200021 0100210 2001012 2112100 2212221 0012201 1211201", s:"1111112 0011130 0112012 0213300 0201133 0012012 0330313", init:"2201021 1100330 1102013 3330100 3312211 0130001 0131113" },
+  { r:7, c:7, t:"1022001 2021201 1122221 1200120 0022200 0221000 1202221", s:"1111112 0120113 0201312 1200120 0003200 0032000 0313333", init:"2131001 2133313 3131022 3001001 0033100 0130110 1200123" },
+  { r:7, c:7, t:"1011021 2020120 2112100 0012121 2200121 0021110 1220111", s:"1121112 0120120 0203300 0011203 0200032 0003120 0331303", init:"0003013 3131020 3331310 1001233 1311311 0130200 2030113" },
+  { r:8, c:8, t:"11100111 12102122 12022100 01121110 22121102 10021211 10222221 10201101", s:"12111212 02011302 13113200 01202030 03303112 01121213 11132032 01313013", init:"20300133 13212020 22001010 01312221 30033210 11122223 11201120 31310100" },
+  { r:8, c:8, t:"12211201 01222101 12112201 12121221 22201121 10200112 11122200 12211221", s:"11121112 00332013 01213112 12032013 03113032 01311212 12111200 03330333", init:"23112300 11312303 31222003 23312313 22211101 31111032 01303101 02000222" },
+  { r:8, c:8, t:"12022021 02211112 21111112 10210110 10212112 20220010 22001122 12002111", s:"11111112 00130202 03021312 01130130 11213312 01331130 01112112 03113303", init:"32002113 10013013 00022212 01100011 10001021 00030030 12111132 23102012" },
+  { r:8, c:8, t:"12110021 22221010 20102201 12122221 12111211 01112221 20122110 10211201", s:"11211112 03321130 01200113 01302012 12130203 00311312 01202130 01330313", init:"21321120 11131131 00200013 11032000 32211333 13111032 20221201 11123302" }
+];
+
+const TOTAL = LEVELS.length;
+
+/* ================= 纯逻辑（与 tools/gen-pipes.js 同实现，供 verify 复用） ================= */
+// 方向：0上 1右 2下 3左
+const OPENINGS = [
+  [[1, 0, 1, 0], [0, 1, 0, 1]],                        // 直(0)：rot0 上下 / rot1 左右
+  [[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1], [1, 0, 0, 1]], // 弯(1)
+  [[1, 1, 1, 0], [0, 1, 1, 1], [1, 0, 1, 1], [1, 1, 0, 1]]  // 丁(2)
+];
+// 返回 4 布尔数组（0上 1右 2下 3左）
+function openingsOf(type, rot) {
+  const arr = OPENINGS[type];
+  const m = ((rot % arr.length) + arr.length) % arr.length;
+  return arr[m].slice();
+}
+// 点击旋转后返回新 rot：直管 0↔1，弯/丁 +1 mod 4
+function rotatable(type, rot) {
+  if (type === 0) return (rot + 1) % 2;
+  return (rot + 1) % 4;
+}
+function dirDelta(d) {
+  if (d === 0) return [-1, 0];
+  if (d === 1) return [0, 1];
+  if (d === 2) return [1, 0];
+  return [0, -1];
+}
+// 胜利：所有相邻格的开口互相连通（局部一致）+ 从 (0,0) 出发 BFS 可达全部格子
+function isSolved(types, rots, r, c) {
+  const n = r * c;
+  for (let i = 0; i < n; i++) {
+    const rr = Math.floor(i / c), cc = i % c;
+    const op = openingsOf(types[i], rots[i]);
+    for (let d = 0; d < 4; d++) {
+      if (!op[d]) continue;
+      const dr = dirDelta(d)[0], dc = dirDelta(d)[1];
+      const nr = rr + dr, nc = cc + dc;
+      if (nr < 0 || nr >= r || nc < 0 || nc >= c) return false; // 开口朝向网格外
+      const j = nr * c + nc;
+      if (!openingsOf(types[j], rots[j])[(d + 2) % 4]) return false;
+    }
+  }
+  const seen = new Uint8Array(n);
+  const q = [0]; seen[0] = 1; let head = 0;
+  while (head < q.length) {
+    const i = q[head++];
+    const rr = Math.floor(i / c), cc = i % c;
+    const op = openingsOf(types[i], rots[i]);
+    for (let d = 0; d < 4; d++) {
+      if (!op[d]) continue;
+      const dr = dirDelta(d)[0], dc = dirDelta(d)[1];
+      const nr = rr + dr, nc = cc + dc;
+      if (nr < 0 || nr >= r || nc < 0 || nc >= c) continue;
+      const j = nr * c + nc;
+      if (!seen[j]) { seen[j] = 1; q.push(j); }
+    }
+  }
+  return q.length === n;
+}
+
+/* ================= 存档（接入 game-hub/save.js，key: "pipes"） =================
+   顶层字段：completed(已通关数 0-12)、currentLevel(当前关卡索引)。无 best。 */
+const SAVE_DEFAULTS = { completed: 0, currentLevel: 0 };
+const save = window.GameSave ? window.GameSave.load('pipes', SAVE_DEFAULTS)
+                             : Object.assign({}, SAVE_DEFAULTS);
+function persist() {
+  if (!window.GameSave) return;
+  window.GameSave.save('pipes', save);
+}
+
+/* ================= DOM / 状态 ================= */
+const cvs = document.getElementById('game');
+const ctx = cvs.getContext('2d');
+const winOverlay = document.getElementById('winOverlay');
+const state = {
+  levelIndex: 0, r: 0, c: 0,
+  types: [], rots: [], init: [],
+  moves: 0, pulse: null,
+  view: { offX: 0, offY: 0, cell: 0 }
+};
+let dpr = 1;
+let winVisible = false;
+
+function parseGrid(s) {
+  return s.replace(/\s+/g, '').split('').map(function (ch) { return Number(ch); });
+}
+
+/* ================= 关卡控制 ================= */
+function loadLevel() {
+  const L = LEVELS[state.levelIndex];
+  state.r = L.r; state.c = L.c;
+  state.types = parseGrid(L.t);
+  state.rots = parseGrid(L.init);
+  state.init = parseGrid(L.init);
+  state.moves = 0; state.pulse = null;
+  hideWin();
+  layout();
+  updateHud();
+  save.currentLevel = state.levelIndex;   // 记录当前关卡
+  persist();
+}
+function restart() {
+  state.rots = state.init.slice();
+  state.moves = 0; state.pulse = null;
+  hideWin();
+  updateHud();
+}
+function goNext() {
+  if (state.levelIndex >= TOTAL - 1) return;
+  if (!(state.levelIndex < save.completed)) return;   // 顺序解锁
+  state.levelIndex = state.levelIndex + 1;
+  loadLevel();
+}
+function goPrev() {
+  if (state.levelIndex <= 0) return;
+  state.levelIndex = state.levelIndex - 1;
+  loadLevel();
+}
+
+/* ================= 布局（整体缩放适配屏幕） ================= */
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  cvs.width  = Math.floor(window.innerWidth  * dpr);
+  cvs.height = Math.floor(window.innerHeight * dpr);
+  cvs.style.width  = window.innerWidth  + 'px';
+  cvs.style.height = window.innerHeight + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  layout();
+}
+function layout() {
+  const W = cvs.width / dpr, H = cvs.height / dpr;
+  const r = state.r, c = state.c;
+  if (!r || !c) { state.view = { offX: 0, offY: 0, cell: 0 }; return; }
+  const hudEl = document.getElementById('hud');
+  const hudH = hudEl ? Math.ceil(hudEl.getBoundingClientRect().height) : 60;
+  const bottomReserve = 40;
+  const availW = W - 32, availH = H - hudH - bottomReserve;
+  const cell = Math.max(18, Math.floor(Math.min(availW / c, availH / r)));
+  const gridW = cell * c, gridH = cell * r;
+  state.view = {
+    offX: (W - gridW) / 2,
+    offY: hudH + 8 + (availH - gridH) / 2,
+    cell: cell
+  };
+}
+
+/* ================= 绘制工具 ================= */
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  if (r < 0) r = 0;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// 已连通区域：从 (0,0) 出发沿「双向互开」的边可达的格子（实时弱色高亮）
+function connectedSet(types, rots, r, c) {
+  const n = r * c;
+  const res = new Uint8Array(n);
+  const q = [0]; res[0] = 1; let head = 0;
+  while (head < q.length) {
+    const i = q[head++];
+    const rr = Math.floor(i / c), cc = i % c;
+    const op = openingsOf(types[i], rots[i]);
+    for (let d = 0; d < 4; d++) {
+      if (!op[d]) continue;
+      const dr = dirDelta(d)[0], dc = dirDelta(d)[1];
+      const nr = rr + dr, nc = cc + dc;
+      if (nr < 0 || nr >= r || nc < 0 || nc >= c) continue;
+      const j = nr * c + nc;
+      if (!res[j] && openingsOf(types[j], rots[j])[(d + 2) % 4]) { res[j] = 1; q.push(j); }
+    }
+  }
+  return res;
+}
+
+function drawPipe(ctx, cx, cy, cell, type, rot, isConn) {
+  const op = openingsOf(type, rot);
+  const lw = Math.max(3, cell * 0.20);
+  const reach = cell / 2 - 3;
+  ctx.strokeStyle = isConn ? '#34d399' : '#4fa8ff';
+  ctx.globalAlpha = isConn ? 0.95 : 0.75;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let d = 0; d < 4; d++) {
+    if (!op[d]) continue;
+    let ex = cx, ey = cy;
+    if (d === 0) ey -= reach;
+    else if (d === 1) ex += reach;
+    else if (d === 2) ey += reach;
+    else ex -= reach;
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+/* ================= 渲染 ================= */
+function render(now) {
+  const W = cvs.width / dpr, H = cvs.height / dpr;
+  const g = ctx.createRadialGradient(W / 2, H * 0.35, 0, W / 2, H * 0.5, Math.max(W, H) * 0.8);
+  g.addColorStop(0, '#232840'); g.addColorStop(1, '#14161f');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  const r = state.r, c = state.c, n = r * c;
+  if (!n) return;
+  const v = state.view;
+  const connected = connectedSet(state.types, state.rots, r, c);
+
+  ctx.save();
+  ctx.translate(v.offX, v.offY);
+
+  for (let i = 0; i < n; i++) {
+    const rr = Math.floor(i / c), cc = i % c;
+    const cx = (cc + 0.5) * v.cell, cy = (rr + 0.5) * v.cell;
+    const isConn = connected[i];
+    const half = v.cell / 2 - 3;
+    const rad = Math.max(3, v.cell * 0.16);
+
+    // 格子底
+    roundRect(ctx, cx - half, cy - half, half * 2, half * 2, rad);
+    ctx.fillStyle = isConn ? 'rgba(46,204,113,0.12)' : 'rgba(255,255,255,0.05)';
+    ctx.fill();
+    ctx.strokeStyle = isConn ? 'rgba(46,204,113,0.30)' : 'rgba(255,255,255,0.10)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 管道
+    drawPipe(ctx, cx, cy, v.cell, state.types[i], state.rots[i], isConn);
+
+    // 点击脉冲环
+    if (state.pulse && state.pulse.idx === i) {
+      const dt = now - state.pulse.t0;
+      if (dt < 320) {
+        const k = dt / 320;
+        ctx.save();
+        ctx.globalAlpha = (1 - k) * 0.8;
+        ctx.strokeStyle = '#a5f3fc';
+        ctx.lineWidth = 2;
+        const s = 0.7 + 0.4 * k;
+        roundRect(ctx, cx - half * s, cy - half * s, half * 2 * s, half * 2 * s, rad);
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        state.pulse = null;
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function frame(now) {
+  render(now);
+  requestAnimationFrame(frame);
+}
+
+/* ================= 交互 ================= */
+function onPointer(e) {
+  if (winVisible) return;
+  const rect = cvs.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const v = state.view;
+  const gx = Math.floor((mx - v.offX) / v.cell), gy = Math.floor((my - v.offY) / v.cell);
+  if (gx < 0 || gx >= state.c || gy < 0 || gy >= state.r) return;
+  const i = gy * state.c + gx;
+  state.rots[i] = rotatable(state.types[i], state.rots[i]);
+  state.moves++;
+  state.pulse = { idx: i, t0: performance.now() };
+  updateHud();
+  if (isSolved(state.types, state.rots, state.r, state.c)) showWin();
+}
+
+/* ================= HUD / 胜利 ================= */
+function updateHud() {
+  document.getElementById('levelLabel').textContent = '第 ' + (state.levelIndex + 1) + ' / ' + TOTAL + ' 关';
+  document.getElementById('moveLabel').textContent = '步数 ' + state.moves;
+  document.getElementById('prevBtn').disabled = state.levelIndex <= 0;
+  document.getElementById('nextBtn').disabled = !(state.levelIndex < TOTAL - 1 && state.levelIndex < save.completed);
+}
+function showWin() {
+  winVisible = true;
+  const last = state.levelIndex === TOTAL - 1;
+  document.getElementById('winTitle').textContent = last ? '🏆 全部通关！' : '🎉 过关！';
+  document.getElementById('winText').textContent = '用了 ' + state.moves + ' 步完成本关';
+  document.getElementById('winNext').textContent = last ? '重玩本关' : '下一关';
+  save.completed = Math.max(save.completed, state.levelIndex + 1);
+  save.currentLevel = Math.min(state.levelIndex + 1, TOTAL - 1);
+  persist();
+  updateHud();
+  winOverlay.classList.remove('hidden');
+}
+function hideWin() {
+  winVisible = false;
+  winOverlay.classList.add('hidden');
+}
+
+/* ================= 启动 ================= */
+document.getElementById('prevBtn').addEventListener('click', goPrev);
+document.getElementById('restartBtn').addEventListener('click', restart);
+document.getElementById('nextBtn').addEventListener('click', goNext);
+document.getElementById('winNext').addEventListener('click', function () {
+  if (state.levelIndex === TOTAL - 1) { hideWin(); restart(); }
+  else goNext();
+});
+cvs.addEventListener('pointerdown', onPointer);
+window.addEventListener('resize', resize);
+resize();
+// 顺序解锁：恢复时夹取到 [0, min(TOTAL-1, completed)]，completed=0 时从第 1 关开始
+const maxUnlocked = Math.min(TOTAL - 1, Math.max(0, Number(save.completed) || 0));
+state.levelIndex = Math.max(0, Math.min(Number(save.currentLevel) || 0, maxUnlocked));
+loadLevel();
+requestAnimationFrame(frame);
+
+/* ================= 导出（供 tools/verify-pipes.js 校验） ================= */
+window.__game = {
+  LEVELS: LEVELS,
+  openingsOf: openingsOf,
+  isSolved: isSolved,
+  rotatable: rotatable
+};
+</script>
+</body>
+</html>

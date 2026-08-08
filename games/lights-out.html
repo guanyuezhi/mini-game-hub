@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>熄灯 · 轻量游戏合集</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(160deg, #1e293b, #0f172a);
+    min-height: 100vh; color: #e2e8f0;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 20px 12px 40px;
+  }
+  header {
+    width: min(92vw, 460px); margin-bottom: 14px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .back { color: #94a3b8; text-decoration: none; font-size: 15px; }
+  .back:hover { color: #7dd3fc; }
+  .top { display: flex; align-items: center; gap: 14px; font-size: 15px; }
+  .title { font-weight: 700; letter-spacing: 1px; color: #fde68a; }
+  #levelLabel { color: #e2e8f0; letter-spacing: 1px; }
+  #moveLabel { color: #7dd3fc; font-variant-numeric: tabular-nums; }
+
+  #board {
+    display: grid; gap: 8px;
+    width: min(92vw, 440px); aspect-ratio: 1 / 1;
+    padding: 12px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+  }
+  .cell {
+    border-radius: 12px; cursor: pointer; user-select: none;
+    transition: background .12s ease, box-shadow .12s ease, transform .08s ease;
+  }
+  .cell.on {
+    background: radial-gradient(circle at 35% 30%, #fde68a, #f59e0b 72%);
+    box-shadow: 0 0 16px rgba(245,158,11,.55), inset 0 0 6px rgba(255,255,255,.35);
+  }
+  .cell.off {
+    background: #1e293b;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.55);
+  }
+  .cell:active { transform: scale(.93); }
+
+  #controls {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    width: min(92vw, 440px); margin-top: 18px;
+  }
+  #controls button {
+    flex: 1; min-width: 88px; padding: 11px 0; font-size: 15px;
+    border-radius: 999px; border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.07); color: #e2e8f0; cursor: pointer;
+  }
+  #controls button:hover:not(:disabled) { background: rgba(255,255,255,.14); }
+  #controls button:disabled { opacity: .35; cursor: default; }
+
+  .hint { margin-top: 18px; font-size: 12.5px; color: #64748b; text-align: center; line-height: 1.8; }
+
+  #modal {
+    position: fixed; inset: 0; z-index: 10;
+    background: rgba(2, 6, 23, .72);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #modal.hidden { display: none; }
+  .modal-box {
+    background: #1e293b; border: 1px solid rgba(255,255,255,.12);
+    border-radius: 14px; padding: 26px 30px; text-align: center;
+    max-width: 360px; width: 88%;
+  }
+  .modal-box h2 { font-size: 1.55rem; margin-bottom: 10px; }
+  .modal-box p { color: #94a3b8; margin: 6px 0; font-size: 15px; }
+  .modal-box p.win-time { color: #7dd3fc; }
+  .modal-box .actions { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+  .modal-box button {
+    flex: 1; padding: 11px 0; font-size: 15px; cursor: pointer;
+    border-radius: 999px; border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.08); color: #e2e8f0;
+  }
+  .modal-box button.primary { background: #0284c7; border-color: #0284c7; color: #fff; font-weight: 600; }
+  .modal-box button:hover { filter: brightness(1.12); }
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="../index.html">← 返回大厅</a>
+  <div class="top">
+    <span class="title">💡 熄灯</span>
+    <span id="levelLabel">第 1 / 10 关</span>
+    <span id="moveLabel">步数 0</span>
+  </div>
+</header>
+
+<main id="board"></main>
+
+<div id="controls">
+  <button id="prevBtn">上一关</button>
+  <button id="restartBtn">重开本关</button>
+  <button id="nextBtn">下一关</button>
+</div>
+
+<div class="hint">点击方格翻转十字灯 · 把所有灯熄灭即过关 · 用最少步数即为最优</div>
+
+<div id="modal" class="hidden">
+  <div class="modal-box">
+    <h2 id="modalTitle">🎉 恭喜过关！</h2>
+    <p class="win-time" id="modalText"></p>
+    <p id="modalAllDone" style="display:none; color:#fbbf24;">已解锁全部 10 关！</p>
+    <div class="actions">
+      <button id="modalReplayBtn">重玩本关</button>
+      <button id="modalNextBtn" class="primary">下一关 →</button>
+    </div>
+  </div>
+</div>
+
+<script src="../save.js"></script>
+<script>
+'use strict';
+
+// ================= 关卡表（离线生成固化，见 tools/gen-lights-out.js） =================
+// board: size² 位串，1=亮 0=灭（行优先）；optimal = 最少按次数（GF(2) 求解）
+const LEVELS = [
+  { size:3, optimal:3, board:"110010001" },
+  { size:3, optimal:4, board:"101011011" },
+  { size:3, optimal:5, board:"100111001" },
+  { size:4, optimal:5, board:"1100111111101001" },
+  { size:4, optimal:6, board:"1110100111101011" },
+  { size:5, optimal:9, board:"0110110000001101011110100" },
+  { size:5, optimal:10, board:"1101000000100001110111100" },
+  { size:5, optimal:12, board:"0011000111000111111110011" },
+  { size:6, optimal:16, board:"000100111101100011110010011110100110" },
+  { size:7, optimal:20, board:"1001100000100001100110011101101110111101010100010" }
+];
+
+const TOTAL = LEVELS.length;
+
+// ================= 存档模块兜底（save.js 缺失时游戏仍可离线玩） =================
+const GameSave = window.GameSave || {
+  load: function (id, d) { return d || {}; },
+  save: function () { return false; }
+};
+
+const boardEl = document.getElementById("board");
+const levelLabel = document.getElementById("levelLabel");
+const moveLabel = document.getElementById("moveLabel");
+let cells = [];
+
+// ================= 游戏状态 =================
+let currentLevel = 0;
+let completed = 0;
+let best = null;       // best = min(best, moves - optimal)，0 = 达成最优，越小越好
+let currentSize = 3;
+let board = "";        // 当前盘面位串
+let moves = 0;
+let winVisible = false;
+
+// ---------- 读存档 ----------
+const saved = GameSave.load("lights-out", { best: null, completed: 0, currentLevel: 0 });
+if (typeof saved.best === "number") best = saved.best;
+if (typeof saved.completed === "number") completed = saved.completed;
+currentLevel = Math.min(Math.max(saved.currentLevel || 0, 0), TOTAL - 1);
+if (currentLevel > completed) currentLevel = completed; // 顺序解锁防越界
+
+// ================= 纯函数（导出给 verify 复用） =================
+
+// 翻转 idx 及上下左右邻（越界忽略），返回新盘面串
+function toggle(board, idx, size) {
+  const arr = board.split("");
+  const r = Math.floor(idx / size), c = idx % size;
+  arr[idx] = arr[idx] === "1" ? "0" : "1";
+  if (r > 0) { const j = idx - size; arr[j] = arr[j] === "1" ? "0" : "1"; }
+  if (r < size - 1) { const j = idx + size; arr[j] = arr[j] === "1" ? "0" : "1"; }
+  if (c > 0) { const j = idx - 1; arr[j] = arr[j] === "1" ? "0" : "1"; }
+  if (c < size - 1) { const j = idx + 1; arr[j] = arr[j] === "1" ? "0" : "1"; }
+  return arr.join("");
+}
+
+function isAllOff(board) { return board.indexOf("1") === -1; }
+
+/**
+ * GF(2) 求 optimal（最少按次数）。
+ * 盘面为 n² 位向量 b；按格 i 的翻转向量为列，构造 n²×n² 矩阵 A（按下 i 翻转 i 及上下左右邻）。
+ * 解 A·p = b (mod 2)：高斯消元（RREF）求特解 p0 + 零空间基（自由列），
+ * 遍历 2^nullity 种组合求 min popcount(p0 ⊕ combo)。
+ * 返回最小按次数；无解返回 null。
+ * 算法与 tools/gen-lights-out.js 的 optimalOf 完全一致。
+ */
+function optimalOf(board, size) {
+  const m = size * size;
+  const row = [];
+  for (let i = 0; i < m; i++) {
+    let mask = 0n;
+    const r = Math.floor(i / size), c = i % size;
+    const cells = [i];
+    if (r > 0) cells.push(i - size);
+    if (r < size - 1) cells.push(i + size);
+    if (c > 0) cells.push(i - 1);
+    if (c < size - 1) cells.push(i + 1);
+    for (const j of cells) mask |= (1n << BigInt(j));
+    if (board[i] === "1") mask |= (1n << BigInt(m));
+    row.push(mask);
+  }
+
+  const pivotRowForCol = new Array(m).fill(-1);
+  let rank = 0;
+  for (let col = 0; col < m; col++) {
+    let pivot = -1;
+    for (let r = rank; r < m; r++) {
+      if ((row[r] >> BigInt(col)) & 1n) { pivot = r; break; }
+    }
+    if (pivot < 0) continue;
+    const tmp = row[rank]; row[rank] = row[pivot]; row[pivot] = tmp;
+    for (let r = 0; r < m; r++) {
+      if (r !== rank && ((row[r] >> BigInt(col)) & 1n)) row[r] ^= row[rank];
+    }
+    pivotRowForCol[col] = rank;
+    rank++;
+  }
+
+  const coeffMask = (1n << BigInt(m)) - 1n;
+  for (let r = rank; r < m; r++) {
+    if ((row[r] & coeffMask) === 0n && ((row[r] >> BigInt(m)) & 1n)) return null;
+  }
+
+  const x = new Array(m).fill(0);
+  for (let col = 0; col < m; col++) {
+    if (pivotRowForCol[col] >= 0) {
+      const r = pivotRowForCol[col];
+      x[col] = Number((row[r] >> BigInt(m)) & 1n);
+    }
+  }
+
+  const nullBasis = [];
+  for (let f = 0; f < m; f++) {
+    if (pivotRowForCol[f] >= 0) continue;
+    const v = new Array(m).fill(0);
+    v[f] = 1;
+    for (let p = 0; p < m; p++) {
+      if (pivotRowForCol[p] >= 0) {
+        const r = pivotRowForCol[p];
+        if ((row[r] >> BigInt(f)) & 1n) v[p] = 1;
+      }
+    }
+    nullBasis.push(v);
+  }
+
+  const nullity = nullBasis.length;
+  const totalCombos = 1 << nullity;
+  let best = Infinity;
+  for (let combo = 0; combo < totalCombos; combo++) {
+    const p = x.slice();
+    for (let bi = 0; bi < nullity; bi++) {
+      if ((combo >> bi) & 1) {
+        for (let j = 0; j < m; j++) p[j] ^= nullBasis[bi][j];
+      }
+    }
+    let w = 0;
+    for (let j = 0; j < m; j++) w += p[j];
+    if (w < best) best = w;
+  }
+  return best;
+}
+
+// ================= 棋盘构建 =================
+function buildBoard(size) {
+  boardEl.innerHTML = "";
+  cells = [];
+  boardEl.style.gridTemplateColumns = "repeat(" + size + ", 1fr)";
+  const n = size * size;
+  for (let i = 0; i < n; i++) {
+    const div = document.createElement("div");
+    div.className = "cell off";
+    (function (idx) {
+      div.addEventListener("click", function () { press(idx); });
+    })(i);
+    boardEl.appendChild(div);
+    cells.push(div);
+  }
+}
+
+// ================= 关卡控制 =================
+function loadLevel(idx) {
+  currentLevel = idx;
+  const lv = LEVELS[idx];
+  currentSize = lv.size;
+  board = lv.board;
+  moves = 0;
+  winVisible = false;
+  buildBoard(currentSize);
+  levelLabel.textContent = "第 " + (idx + 1) + " / " + TOTAL + " 关";
+  updateHud();
+  render();
+  saveProgress();
+}
+
+function restart() {
+  board = LEVELS[currentLevel].board;
+  moves = 0;
+  winVisible = false;
+  updateHud();
+  render();
+}
+
+function goNext() { loadLevel(Math.min(currentLevel + 1, TOTAL - 1)); }
+function goPrev() { loadLevel(Math.max(currentLevel - 1, 0)); }
+
+// ================= 交互 =================
+function press(idx) {
+  if (winVisible) return;
+  board = toggle(board, idx, currentSize);
+  moves++;
+  updateHud();
+  render();
+  if (isAllOff(board)) win();
+}
+
+// ================= 渲染 =================
+function render() {
+  for (let i = 0; i < cells.length; i++) {
+    cells[i].classList.toggle("on", board[i] === "1");
+    cells[i].classList.toggle("off", board[i] === "0");
+  }
+  updateButtons();
+}
+
+function updateHud() {
+  moveLabel.textContent = "步数 " + moves;
+  updateButtons();
+}
+
+function updateButtons() {
+  document.getElementById("prevBtn").disabled = currentLevel <= 0;
+  document.getElementById("nextBtn").disabled = !(currentLevel < TOTAL - 1 && currentLevel < completed);
+}
+
+// ================= 胜利 =================
+function win() {
+  if (winVisible) return;
+  winVisible = true;
+  const opt = optimalOf(LEVELS[currentLevel].board, currentSize);
+  const diff = moves - opt; // 实际 >= 0
+  if (best == null || diff < best) best = diff;
+  completed = Math.max(completed, currentLevel + 1);
+  GameSave.save("lights-out", {
+    best: best,
+    completed: completed,
+    currentLevel: Math.min(currentLevel + 1, TOTAL - 1)
+  });
+
+  const isLast = currentLevel === TOTAL - 1;
+  document.getElementById("modalTitle").textContent = isLast ? "🏆 全部通关！" : "🎉 恭喜过关！";
+  const optText = diff === 0 ? "，达成最优！" : "（最优 " + opt + " 次）";
+  document.getElementById("modalText").textContent = "用了 " + moves + " 次" + optText;
+  document.getElementById("modalAllDone").style.display = isLast ? "" : "none";
+  document.getElementById("modalNextBtn").style.display = isLast ? "none" : "";
+  document.getElementById("modal").classList.remove("hidden");
+}
+
+// ================= 存档 =================
+function saveProgress() {
+  GameSave.save("lights-out", { best: best, completed: completed, currentLevel: currentLevel });
+}
+
+// ================= 事件绑定 =================
+document.getElementById("prevBtn").addEventListener("click", goPrev);
+document.getElementById("restartBtn").addEventListener("click", restart);
+document.getElementById("nextBtn").addEventListener("click", goNext);
+
+document.getElementById("modalReplayBtn").addEventListener("click", function () {
+  document.getElementById("modal").classList.add("hidden");
+  restart();
+});
+document.getElementById("modalNextBtn").addEventListener("click", function () {
+  document.getElementById("modal").classList.add("hidden");
+  goNext();
+});
+
+document.addEventListener("keydown", function (e) {
+  const modalHidden = document.getElementById("modal").classList.contains("hidden");
+  if (!modalHidden && e.key === "Enter") {
+    const nextBtn = document.getElementById("modalNextBtn");
+    if (nextBtn.style.display !== "none") goNext();
+    else restart();
+  }
+});
+
+// ================= 启动 =================
+loadLevel(currentLevel);
+
+// ================= 导出（verify-lights-out.js 复用） =================
+window.__game = {
+  LEVELS: LEVELS,
+  toggle: toggle,
+  isAllOff: isAllOff,
+  optimalOf: optimalOf
+};
+</script>
+</body>
+</html>

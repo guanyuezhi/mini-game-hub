@@ -2,20 +2,62 @@
 
 和朋友随时开玩的小游戏合集。纯静态网页、零依赖、零构建，双击即可在浏览器运行。
 
+## 游戏清单
+
+| 游戏 | 关卡 | 最佳纪录 | 说明 |
+|------|------|----------|------|
+| 🧪 瓶子倒水 | 50 | — | 把相同颜色的水倒回同一瓶 |
+| 🧩 数独 | 10 | 最快用时 | 填入 1-9，每行每列每宫不重复 |
+| 🎮 2048 | 里程碑 10 级 | 最高分 | 滑动数字方块，两两合并成更大的数 |
+| 💣 扫雷 | 10 | 最快用时 | 翻开方块，避开地雷，用数字推理 |
+| 💡 熄灯 | 10 | 相对最优 | 点击方格翻转十字灯，把所有灯熄灭 |
+| 🔢 15 拼图 | 10 | 相对最优 | 滑动方块，把数字按顺序排好 |
+| 🎯 猜数字 | 10 | 最少猜次 | 根据黑白反馈破译隐藏的颜色密码 |
+| 🖼️ 数织 | 12 | — | 按行列数字提示，推理涂出隐藏图案 |
+| 🔧 水管连接 | 12 | — | 旋转管道，让所有水路接通成一个网络 |
+| 🚗 华容道·塞车 | 12 | 相对最优 | 滑动车辆腾出通道，让红色小车驶出 |
+
+> "相对最优" = 实际步数 − 最优步数（0 或更小即达成最优）。
+
 ## 目录结构
 
 ```
 game-hub/
 ├── index.html              # 游戏大厅（卡片列表 + 每游戏最佳纪录）
 ├── save.js                 # 公共存档模块（版本化 localStorage 封装）
-├── games/
+├── games/                  # 每个游戏一个零依赖单文件 HTML
 │   ├── water-sort.html     # 瓶子倒水 · 50 关
-│   └── sudoku.html         # 数独 · 10 关
-├── tools/
-│   ├── gen-water-sort-levels.js   # 瓶子倒水关卡离线生成器（50→500 关扩展入口）
-│   ├── verify-water-sort.js       # 瓶子倒水关卡全量校验
-│   └── solve-water-sort.js        # 求解工具：输出指定关卡解法步骤
-└── README.md
+│   ├── sudoku.html         # 数独 · 10 关
+│   ├── 2048.html           # 2048 · 里程碑 10 级
+│   ├── minesweeper.html    # 扫雷 · 10 关
+│   ├── lights-out.html     # 熄灯 · 10 关
+│   ├── puzzle-15.html      # 15 拼图 · 10 关
+│   ├── mastermind.html     # 猜数字 · 10 关
+│   ├── nonogram.html       # 数织 · 12 关
+│   ├── pipes.html          # 水管连接 · 12 关
+│   └── rush-hour.html      # 华容道·塞车 · 12 关
+└── tools/
+    ├── _dom_stub.js              # verify 共享 DOM/Canvas 桩
+    ├── gen-water-sort-levels.js  # 瓶子倒水关卡离线生成器
+    ├── gen-lights-out.js         # 熄灯生成器（GF(2) 求最优）
+    ├── gen-puzzle15.js           # 15 拼图生成器（A* 求最优）
+    ├── gen-mastermind.js         # 猜数字生成器（贪心 minimax 验证）
+    ├── gen-nonogram.js           # 数织生成器（回溯唯一解验证）
+    ├── gen-pipes.js              # 水管连接生成器（生成树构造可解）
+    ├── gen-rush-hour.js          # 华容道生成器（后向游走 + BFS）
+    ├── verify-*.js               # 各游戏关卡全量校验（读 HTML 抠内联脚本跑原逻辑）
+    ├── solve-water-sort.js       # 求解工具：输出指定关卡解法步骤
+    └── _levels_out.js            # 生成器输出（人工粘贴进对应 HTML）
+```
+
+## 生成流水线
+
+每游戏关卡离线生成 → 验证 → 固化：
+
+```
+node tools/gen-<game>.js      # 生成 tools/_levels_out.js（const LEVELS = [...]）
+# 把 LEVELS 粘贴进 games/<game>.html 的 const LEVELS = [...]
+node tools/verify-<game>.js   # 从 HTML 抠内联脚本跑游戏原逻辑，逐关校验可解/最优/结构
 ```
 
 ## 本地运行
@@ -37,6 +79,8 @@ npx serve .
 1. 在 `games/` 下新建 `xxx.html`，顶部引入 `<script src="../save.js"></script>`
 2. 存档对象顶层提供 `completed`（通关数）；需要在大厅展示最佳纪录的游戏再加 `best`（数值越小越好）
 3. 在 `index.html` 的 `GAMES` 数组中登记卡片信息（id / 名称 / 图标 / 描述 / 格式化函数）
+4. 若关卡离线生成：写 `tools/gen-xxx.js` 生成器 + `tools/verify-xxx.js` 校验（用 `_dom_stub.js` 抠游戏内联脚本跑原逻辑）
+5. 游戏脚本保持单一内联 `<script>` 块，末尾 `window.__game = {...}` 导出纯函数与 `LEVELS`（供 verify 复用）
 
 ## 部署到 GitHub Pages
 

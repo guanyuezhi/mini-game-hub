@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>数织 · 轻量游戏合集</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(160deg, #1e293b, #0f172a);
+    min-height: 100vh; color: #e2e8f0;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 20px 12px 40px;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  header {
+    width: min(92vw, 480px); margin-bottom: 14px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .back { color: #94a3b8; text-decoration: none; font-size: 15px; }
+  .back:hover { color: #7dd3fc; }
+  .top { display: flex; align-items: center; gap: 14px; font-size: 15px; }
+  #levelLabel { color: #e2e8f0; letter-spacing: 1px; }
+
+  #board {
+    font-size: 30px; /* 运行时 JS 按格子尺寸覆盖，子元素用 em 相对缩放 */
+    display: grid;
+    gap: 1px;
+    background: #475569;
+    border: 3px solid #64748b;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .corner { background: #0f172a; }
+  .clue {
+    display: flex; background: #1e293b; color: #e2e8f0;
+    font-size: 0.52em; font-weight: 600;
+  }
+  .clue span { min-width: 1em; text-align: center; line-height: 1.25; }
+  .col-clue { flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; padding-bottom: 4px; }
+  .row-clue { flex-direction: row; justify-content: flex-end; align-items: center; gap: 2px; padding-right: 4px; }
+  .cell {
+    background: #1e293b; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.5em; font-weight: 700;
+    touch-action: manipulation;
+  }
+  .cell.fill { background: #38bdf8; }
+  .cell.mark { color: #f87171; }
+  .cell:active { filter: brightness(1.3); }
+
+  #controls {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    width: min(92vw, 480px); margin-top: 14px;
+  }
+  #controls button {
+    flex: 1; min-width: 88px; padding: 11px 0; font-size: 15px;
+    border-radius: 999px; border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.07); color: #e2e8f0; cursor: pointer;
+  }
+  #controls button:hover:not(:disabled) { background: rgba(255,255,255,.14); }
+  #controls button:disabled { opacity: .35; cursor: default; }
+
+  .hint {
+    margin-top: 16px; font-size: 12.5px; color: #64748b; text-align: center; line-height: 1.8;
+    max-width: 92vw;
+  }
+
+  #modal {
+    position: fixed; inset: 0; z-index: 10;
+    background: rgba(2, 6, 23, .72);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #modal.hidden { display: none; }
+  .modal-box {
+    background: #1e293b; border: 1px solid rgba(255,255,255,.12);
+    border-radius: 14px; padding: 26px 30px; text-align: center;
+    max-width: 360px; width: 88%;
+  }
+  .modal-box h2 { font-size: 1.55rem; margin-bottom: 10px; }
+  .modal-box p { color: #94a3b8; margin: 6px 0; font-size: 15px; }
+  .modal-box .actions { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+  .modal-box button {
+    flex: 1; padding: 11px 0; font-size: 15px; cursor: pointer;
+    border-radius: 999px; border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.08); color: #e2e8f0;
+  }
+  .modal-box button.primary { background: #0284c7; border-color: #0284c7; color: #fff; font-weight: 600; }
+  .modal-box button:hover { filter: brightness(1.12); }
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="../index.html">← 返回大厅</a>
+  <div class="top">
+    <span id="levelLabel">第 1 / 12 关</span>
+  </div>
+</header>
+
+<main id="board"></main>
+
+<div id="controls">
+  <button id="prevBtn">上一关</button>
+  <button id="restartBtn">重开本关</button>
+  <button id="nextBtn">下一关</button>
+</div>
+
+<div class="hint">点击格子循环：涂黑 → 打 ✕ → 清空 · 右键 / 长按直接打 ✕ · 涂黑集合与图案一致即过关</div>
+
+<div id="modal" class="hidden">
+  <div class="modal-box">
+    <h2 id="modalTitle">🎉 过关！</h2>
+    <p id="modalAllDone" style="display:none; color:#fbbf24;">已解锁全部 12 关！</p>
+    <div class="actions">
+      <button id="modalReplayBtn">重玩本关</button>
+      <button id="modalNextBtn" class="primary">下一关 →</button>
+    </div>
+  </div>
+</div>
+
+<script src="../save.js"></script>
+<script>
+'use strict';
+
+/* ================= 关卡表（离线生成固化，唯一解已用 tools/gen-nonogram.js + verify 验证） =================
+   sol 为 size² 位串，行优先，1=涂黑；rows/cols 为行列数字提示。 */
+const LEVELS = [
+  { size:5, rows:[[1],[3],[1],[3],[2,2]], cols:[[1,2],[4],[1,1],[1],[1,1]], sol:"0000111100010001110011011" },
+  { size:5, rows:[[1],[5],[3],[4],[2]], cols:[[1],[1,1],[3],[4],[5]], sol:"0000111111001110111100011" },
+  { size:6, rows:[[1,2],[3],[2,1],[2,1],[2,1,1],[1,3]], cols:[[1,3],[5],[1],[2,3],[1,1],[1,2]], sol:"100110011100110001110100110101010111" },
+  { size:6, rows:[[3],[1,1,2],[5],[1],[3],[5]], cols:[[2,1],[1,2],[3,2],[1,1,2],[3,1],[1,1]], sol:"001110101011111110000001011100111110" },
+  { size:7, rows:[[2,2,1],[2,2],[1],[5,1],[2,2],[1,2],[2,1]], cols:[[1,3,1],[2,4],[1,1],[1,1,2],[1,1,1],[1,1],[2,2]], sol:"1101101011001110000001111101110001101011001101000" },
+  { size:7, rows:[[2,2],[4],[4],[1,4],[2,2,1],[2,1],[2,2]], cols:[[2,2],[2,3],[1,1,2],[4],[5],[1,2,1],[1,1,1]], sol:"1100011111100000011111011110110110101101000110110" },
+  { size:8, rows:[[3,3],[1,1],[1,2],[2,3,1],[1,3,1],[1,1],[2,3],[1,4]], cols:[[2,3,1],[1,1],[1,1,4],[2,2],[2,1],[1,2,2],[3,1],[1,2,1]], sol:"1110011110000010001001101101110110111001101000000011011110111100" },
+  { size:8, rows:[[1,1,3],[5],[3,3],[1,2],[1,1,2],[3,2],[2,4],[2,1]], cols:[[1,2,1],[1,3],[2,3],[3,1,1],[1,1],[3,1,1],[7],[1,2,2]], sol:"1001011100111110011101111000001110100110011100110110111111010000" },
+  { size:9, rows:[[3,1,1],[2,3,1],[1,1,1],[1,4],[1,3],[1,6],[3,1,1],[3],[3,2]], cols:[[2,3,1],[4,1,1],[1,2,1],[1],[1,1,1],[3,3],[2,3,2],[5,1],[2,2]], sol:"111000101110011101010001010010001111100000111101111110111001010000011100111000110" },
+  { size:9, rows:[[3,2],[2],[1,3],[5,1],[2,1,1,1],[2,4],[3,3,1],[1,1,1],[2,2,1]], cols:[[1,1,3],[6,1],[4],[1,1],[1,5,1],[1,1,4],[1,3],[1,1],[1,2,3]], sol:"000111011110000000010011100111110001011010101011011110111011101100001001110011001" },
+  { size:10, rows:[[6,1],[3,1,1],[2,1,1,1],[4,3],[2,1,1,1,1],[5,2],[3,3,2],[5],[1,5,1],[1,1,1,1]], cols:[[1,1,2],[4,4],[2,1,3],[6,3],[1,1,4],[3,3,1],[1,2,1],[1,2,2],[2,2],[2,4,2]], sol:"0011111101011101000111010100100111100111110101010100111110111110111011111110000001011111010101000101" },
+  { size:10, rows:[[5,2],[2,1,2],[2,1,2],[10],[3,4,1],[1,6],[3,2,2],[1,1,3,2],[1,2,1,1],[1,1,3]], cols:[[1,7],[1,3,1],[2,2,4],[2,1,1,1],[1,6],[7],[6,1],[1,4,2],[1,1,3,1],[1,2,2,1]], sol:"1111101100001100101111001011001111111111111011110110011111101110110011101011101110110101000010010111" }
+];
+
+const TOTAL = LEVELS.length;
+
+// 存档模块兜底（save.js 缺失时游戏仍可离线玩）
+const GameSave = window.GameSave || {
+  load: function (id, d) { return d || {}; },
+  save: function () { return false; }
+};
+
+/* ================= 纯逻辑（供 tools/verify-nonogram.js 复用，与生成器一致） ================= */
+
+// run-length 编码：1=涂黑。空行/空列返回 [0]。
+function cluesOf(line) {
+  const res = [];
+  let run = 0;
+  for (let i = 0; i < line.length; i++) {
+    const v = line[i] === 1 || line[i] === '1' ? 1 : 0;
+    if (v === 1) run++;
+    else if (run > 0) { res.push(run); run = 0; }
+  }
+  if (run > 0) res.push(run);
+  if (res.length === 0) res.push(0);
+  return res;
+}
+
+// 枚举长度为 n 的所有满足提示 clues 的位掩码（Set<number>，bit i 表示第 i 格，1=涂黑）。
+function genLineCandidates(n, clues) {
+  const res = new Set();
+  if (clues.length === 1 && clues[0] === 0) { res.add(0); return res; }
+  const totalRun = clues.reduce((a, b) => a + b, 0);
+  const numRuns = clues.length;
+  const minLen = totalRun + (numRuns - 1);
+  if (minLen > n) return res;
+  const extra = n - minLen;
+  const gaps = new Array(numRuns + 1).fill(0);
+  for (let i = 1; i < numRuns; i++) gaps[i] = 1;
+  function distribute(gapIdx, rem) {
+    if (gapIdx === numRuns) {
+      gaps[gapIdx] += rem;
+      let mask = 0, pos = 0;
+      for (let k = 0; k < numRuns; k++) {
+        pos += gaps[k];
+        for (let b = 0; b < clues[k]; b++) mask |= (1 << (pos + b));
+        pos += clues[k];
+      }
+      res.add(mask);
+      gaps[gapIdx] -= rem;
+      return;
+    }
+    for (let add = 0; add <= rem; add++) {
+      gaps[gapIdx] += add;
+      distribute(gapIdx + 1, rem - add);
+      gaps[gapIdx] -= add;
+    }
+  }
+  distribute(0, extra);
+  return res;
+}
+
+// 求解器：对提示 (rows, cols) 逐行 DFS 计数解数，达到 limit 立即停。
+function countSolutions(size, rows, cols, limit) {
+  const rowCands = rows.map(clues => genLineCandidates(size, clues));
+  for (const s of rowCands) if (s.size === 0) return 0;
+  const colCands = cols.map(clues => genLineCandidates(size, clues));
+  for (const s of colCands) if (s.size === 0) return 0;
+
+  const colAllowed = colCands.map(s => new Set(s));
+  let count = 0;
+
+  function dfs(r) {
+    if (count >= limit) return;
+    if (r === size) { count++; return; }
+    for (const rb of rowCands[r]) {
+      const newSets = [];
+      let ok = true;
+      for (let c = 0; c < size; c++) {
+        const bit = (rb >> c) & 1;
+        const ns = new Set();
+        for (const cm of colAllowed[c]) {
+          if (((cm >> r) & 1) === bit) ns.add(cm);
+        }
+        if (ns.size === 0) { ok = false; break; }
+        newSets.push(ns);
+      }
+      if (!ok) continue;
+      const old = colAllowed.slice();
+      for (let c = 0; c < size; c++) colAllowed[c] = newSets[c];
+      dfs(r + 1);
+      for (let c = 0; c < size; c++) colAllowed[c] = old[c];
+      if (count >= limit) return;
+    }
+  }
+
+  dfs(0);
+  return count;
+}
+
+function arrEq(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+// sol（size² 位串）推导出的行列提示是否严格等于 rows/cols。
+function matchesClues(size, rows, cols, sol) {
+  const grid = [];
+  for (let r = 0; r < size; r++) {
+    grid.push(sol.slice(r * size, r * size + size).split('').map(Number));
+  }
+  for (let r = 0; r < size; r++) {
+    if (!arrEq(cluesOf(grid[r]), rows[r])) return false;
+  }
+  for (let c = 0; c < size; c++) {
+    const col = [];
+    for (let r = 0; r < size; r++) col.push(grid[r][c]);
+    if (!arrEq(cluesOf(col), cols[c])) return false;
+  }
+  return true;
+}
+
+/* ================= DOM ================= */
+const boardEl = document.getElementById('board');
+const levelLabel = document.getElementById('levelLabel');
+
+/* ================= 游戏状态 ================= */
+let size = 5, rows = [], cols = [], sol = '';
+let maxRowClues = 0, maxColClues = 0;
+let state = [];   // state[r][c]: 0 空 / 1 涂黑 / 2 打 X
+let cellEls = [];
+let currentLevel = 0;
+let completed = 0;
+
+// 读档：completed + currentLevel（无 best，大厅 bestText:null）
+const saved = GameSave.load('nonogram', { completed: 0, currentLevel: 0 });
+if (typeof saved.completed === 'number') completed = saved.completed;
+currentLevel = Math.min(Math.max(saved.currentLevel || 0, 0), TOTAL - 1);
+currentLevel = Math.min(currentLevel, completed); // 防数据不一致
+
+/* ================= 布局 ================= */
+function cellPx() {
+  const maxW = Math.min(window.innerWidth * 0.94, 500);
+  const availH = Math.max(140, window.innerHeight - 210);
+  return Math.max(6, Math.floor(Math.min(
+    maxW / (size + maxRowClues),
+    availH / (size + maxColClues)
+  )));
+}
+
+function buildBoard() {
+  boardEl.innerHTML = '';
+  const cell = cellPx();
+  boardEl.style.fontSize = cell + 'px'; // 子元素用 em 相对缩放
+
+  const widths = [maxRowClues * cell];
+  for (let c = 0; c < size; c++) widths.push(cell);
+  const heights = [maxColClues * cell];
+  for (let r = 0; r < size; r++) heights.push(cell);
+  boardEl.style.gridTemplateColumns = widths.map(w => w + 'px').join(' ');
+  boardEl.style.gridTemplateRows = heights.map(h => h + 'px').join(' ');
+
+  // 左上角空白角
+  const corner = document.createElement('div');
+  corner.className = 'corner';
+  corner.style.gridRowStart = 1;
+  corner.style.gridColumnStart = 1;
+  boardEl.appendChild(corner);
+
+  // 列提示（上方）
+  for (let c = 0; c < size; c++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'clue col-clue';
+    wrap.style.gridRowStart = 1;
+    wrap.style.gridColumnStart = c + 2;
+    for (const v of cols[c]) {
+      const span = document.createElement('span');
+      span.textContent = v;
+      wrap.appendChild(span);
+    }
+    boardEl.appendChild(wrap);
+  }
+
+  // 行提示（左侧）
+  for (let r = 0; r < size; r++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'clue row-clue';
+    wrap.style.gridRowStart = r + 2;
+    wrap.style.gridColumnStart = 1;
+    for (const v of rows[r]) {
+      const span = document.createElement('span');
+      span.textContent = v;
+      wrap.appendChild(span);
+    }
+    boardEl.appendChild(wrap);
+  }
+
+  // 网格格
+  cellEls = [];
+  for (let r = 0; r < size; r++) {
+    const rowEls = [];
+    for (let c = 0; c < size; c++) {
+      const div = document.createElement('div');
+      div.className = 'cell';
+      div.style.gridRowStart = r + 2;
+      div.style.gridColumnStart = c + 2;
+      bindCell(div, r, c);
+      boardEl.appendChild(div);
+      rowEls.push(div);
+    }
+    cellEls.push(rowEls);
+  }
+}
+
+/* ================= 交互 ================= */
+function bindCell(div, r, c) {
+  let longTimer = null;
+  let longFired = false;
+
+  div.addEventListener('click', function (ev) {
+    if (longFired) { longFired = false; return; }
+    cycleCell(r, c);
+  });
+
+  div.addEventListener('contextmenu', function (ev) {
+    ev.preventDefault();
+    clearLong();
+    setX(r, c);
+  });
+
+  // 长按（移动端）直接打 X
+  div.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType === 'mouse') return;
+    longFired = false;
+    longTimer = setTimeout(function () {
+      longFired = true;
+      setX(r, c);
+      longTimer = null;
+    }, 420);
+  });
+
+  function clearLong() {
+    if (longTimer) { clearTimeout(longTimer); longTimer = null; }
+  }
+  div.addEventListener('pointerup', clearLong);
+  div.addEventListener('pointercancel', clearLong);
+  div.addEventListener('pointerleave', clearLong);
+}
+
+function cycleCell(r, c) {
+  state[r][c] = (state[r][c] + 1) % 3; // 0 → 1 → 2 → 0
+  renderCell(r, c);
+  checkWin();
+}
+
+function setX(r, c) {
+  state[r][c] = 2;
+  renderCell(r, c);
+}
+
+function renderCell(r, c) {
+  const div = cellEls[r][c];
+  div.classList.remove('fill', 'mark');
+  const v = state[r][c];
+  if (v === 1) { div.classList.add('fill'); div.textContent = ''; }
+  else if (v === 2) { div.classList.add('mark'); div.textContent = '✕'; }
+  else div.textContent = '';
+}
+
+/* ================= 胜利判定 ================= */
+// 涂黑集合 === 标准解 sol 的集合（X 只是辅助标记，不影响判定）
+function checkWin() {
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      const want = sol.charAt(r * size + c) === '1';
+      if ((state[r][c] === 1) !== want) return;
+    }
+  }
+  win();
+}
+
+function win() {
+  const isLast = currentLevel === TOTAL - 1;
+  document.getElementById('modalTitle').textContent = isLast ? '🏆 全部通关！' : '🎉 过关！';
+  document.getElementById('modalAllDone').style.display = isLast ? '' : 'none';
+  document.getElementById('modalNextBtn').style.display = isLast ? 'none' : '';
+  document.getElementById('modal').classList.remove('hidden');
+  completed = Math.max(completed, currentLevel + 1);
+  GameSave.save('nonogram', {
+    completed: completed,
+    currentLevel: Math.min(currentLevel + 1, TOTAL - 1)
+  });
+  updateButtons();
+}
+
+/* ================= 关卡控制 ================= */
+function loadLevel(idx) {
+  currentLevel = idx;
+  const lv = LEVELS[idx];
+  size = lv.size;
+  rows = lv.rows;
+  cols = lv.cols;
+  sol = lv.sol;
+  state = [];
+  for (let r = 0; r < size; r++) state.push(new Array(size).fill(0));
+
+  maxRowClues = 0;
+  for (const r of rows) maxRowClues = Math.max(maxRowClues, r.length);
+  maxColClues = 0;
+  for (const c of cols) maxColClues = Math.max(maxColClues, c.length);
+
+  buildBoard();
+  levelLabel.textContent = '第 ' + (idx + 1) + ' / ' + TOTAL + ' 关';
+  updateButtons();
+  saveProgress();
+}
+
+function restart() {
+  for (let r = 0; r < size; r++) state[r].fill(0);
+  for (let r = 0; r < size; r++)
+    for (let c = 0; c < size; c++) renderCell(r, c);
+}
+
+function goNext() { loadLevel(Math.min(currentLevel + 1, TOTAL - 1)); }
+function goPrev() { loadLevel(Math.max(currentLevel - 1, 0)); }
+
+function updateButtons() {
+  document.getElementById('prevBtn').disabled = currentLevel <= 0;
+  document.getElementById('nextBtn').disabled = !(currentLevel < TOTAL - 1 && currentLevel < completed);
+}
+
+function saveProgress() {
+  GameSave.save('nonogram', { completed: completed, currentLevel: currentLevel });
+}
+
+/* ================= 事件绑定 ================= */
+document.getElementById('prevBtn').addEventListener('click', goPrev);
+document.getElementById('restartBtn').addEventListener('click', restart);
+document.getElementById('nextBtn').addEventListener('click', goNext);
+
+document.getElementById('modalReplayBtn').addEventListener('click', function () {
+  document.getElementById('modal').classList.add('hidden');
+  restart();
+});
+document.getElementById('modalNextBtn').addEventListener('click', function () {
+  document.getElementById('modal').classList.add('hidden');
+  goNext();
+});
+
+window.addEventListener('resize', function () {
+  if (size > 0) {
+    buildBoard();
+    for (let r = 0; r < size; r++)
+      for (let c = 0; c < size; c++) renderCell(r, c);
+  }
+});
+
+document.addEventListener('keydown', function (e) {
+  const modalHidden = document.getElementById('modal').classList.contains('hidden');
+  if (!modalHidden) {
+    if (e.key === 'Enter') {
+      const nb = document.getElementById('modalNextBtn');
+      if (nb.style.display !== 'none') goNext(); else restart();
+    }
+  }
+});
+
+/* ================= 启动 ================= */
+loadLevel(currentLevel);
+
+/* ================= 导出（供 tools/verify-nonogram.js 校验） ================= */
+window.__game = {
+  LEVELS: LEVELS,
+  cluesOf: cluesOf,
+  genLineCandidates: genLineCandidates,
+  countSolutions: countSolutions,
+  matchesClues: matchesClues
+};
+</script>
+</body>
+</html>
