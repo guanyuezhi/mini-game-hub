@@ -9,12 +9,14 @@ game-hub/
 ├── index.html              # 游戏大厅（卡片列表 + 每游戏最佳纪录）
 ├── save.js                 # 公共存档模块（版本化 localStorage 封装）
 ├── games/
-│   ├── water-sort.html     # 分离流沙（瓶子倒水）· 50 关
-│   └── sudoku.html         # 数独 · 10 关
+│   ├── water-sort.html     # 瓶子倒水 · 50 关
+│   ├── sudoku.html         # 数独 · 10 关
+│   └── tape-peel.html      # 撕胶带（层层撕）· 5 关
 ├── tools/
-│   ├── gen-water-sort-levels.js   # 分离流沙关卡离线生成器（50→500 关扩展入口）
-│   ├── verify-water-sort.js       # 分离流沙关卡全量校验
-│   └── solve-water-sort.js        # 求解工具：输出指定关卡解法步骤
+│   ├── gen-water-sort-levels.js   # 瓶子倒水关卡离线生成器（50→500 关扩展入口）
+│   ├── verify-water-sort.js       # 瓶子倒水关卡全量校验
+│   ├── solve-water-sort.js        # 求解工具：输出指定关卡解法步骤
+│   └── verify-tape-peel.js        # 撕胶带关卡校验（可解/难度/边界）
 └── README.md
 ```
 
@@ -35,7 +37,7 @@ npx serve .
 ## 新增游戏
 
 1. 在 `games/` 下新建 `xxx.html`，顶部引入 `<script src="../save.js"></script>`
-2. 存档对象顶层提供 `best`（最佳表现，数值越小越好）和 `completed`（通关数）
+2. 存档对象顶层提供 `completed`（通关数）；需要在大厅展示最佳纪录的游戏再加 `best`（数值越小越好）
 3. 在 `index.html` 的 `GAMES` 数组中登记卡片信息（id / 名称 / 图标 / 描述 / 格式化函数）
 
 ## 部署到 GitHub Pages

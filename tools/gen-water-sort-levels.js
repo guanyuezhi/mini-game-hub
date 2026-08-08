@@ -1,6 +1,6 @@
 /**
  * gen-water-sort-levels.js
- * 离线生成「分离流沙」关卡表（50 关，为 500 关铺路）。
+ * 离线生成「瓶子倒水」关卡表（50 关，为 500 关铺路）。
  *
  * 核心思路：
  *  - 分装算法逐行复刻 games/water-sort.html 的 generateLevel（随机打散全部色块 →

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>撕胶带 · 层层撕</title>
+<!-- 公共存档模块（game-hub） -->
+<script src="../save.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #14161f; color: #e8eaf0;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 顶部 HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px;
+    background: rgba(20, 22, 31, 0.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  #hud a.back {
+    color: #e8eaf0; text-decoration: none;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+    padding: 6px 12px; border-radius: 999px; font-size: 13px;
+    transition: background .15s;
+  }
+  #hud a.back:hover { background: rgba(255,255,255,0.16); }
+  #hud .title { font-weight: 700; letter-spacing: 1px; margin-right: 4px; }
+  .chip { font-size: 13px; opacity: 0.85; padding: 6px 10px; }
+  .pill {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); color: #e8eaf0;
+    padding: 6px 13px; border-radius: 999px; font-size: 13px; cursor: pointer;
+    transition: background .15s;
+  }
+  .pill:hover { background: rgba(255,255,255,0.16); }
+  .pill:active { transform: scale(0.96); }
+  .pill.primary { background: rgba(80,170,255,0.18); border-color: rgba(80,170,255,0.5); }
+  .pill.primary:hover { background: rgba(80,170,255,0.3); }
+  .pill:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+
+  #hint {
+    position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; z-index: 5;
+    font-size: 12px; color: rgba(255,255,255,0.42); padding: 0 12px;
+    transition: color .15s;
+  }
+  #hint.warn { color: #ff8a80; }
+
+  /* 棋盘区域 */
+  #boardWrap {
+    position: fixed; inset: 64px 0 36px 0; z-index: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #board { position: relative; transform-origin: center center; }
+
+  /* 胶带 */
+  .tape {
+    position: absolute; border-radius: 6px; cursor: pointer;
+    transition: transform .32s cubic-bezier(.34,1.2,.4,1), opacity .3s ease, box-shadow .15s, filter .15s;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.22);
+    transform: translate(-50%,-50%) rotate(var(--a));
+  }
+  .tape::before { /* 半透明胶带质感 */
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0 9px, transparent 9px 18px);
+  }
+  .tape .tab { /* 可撕的边角 */
+    position: absolute; right: -3px; top: 50%; transform: translateY(-50%);
+    width: 11px; height: 15px; border-radius: 3px;
+    background: rgba(255,255,255,0.55); box-shadow: 0 2px 5px rgba(0,0,0,0.25);
+  }
+  .tape.free:hover { transform: translate(-50%,-50%) rotate(var(--a)) scale(1.045); }
+  .tape.blocked {
+    filter: brightness(0.5) saturate(0.55); opacity: 0.72;
+    cursor: not-allowed; box-shadow: none;
+  }
+  .tape.hintflash { box-shadow: 0 0 0 2.5px #ffd54f, 0 0 22px #ffd54f; }
+  .tape.peeling {
+    transform: translate(-50%,-50%) rotate(var(--a)) translate(0,-74px) rotate(26deg) scale(1.07);
+    opacity: 0; pointer-events: none;
+  }
+  .tape.shake { animation: shake .3s; }
+  @keyframes shake {
+    0%,100% { transform: translate(-50%,-50%) rotate(var(--a)); }
+    25% { transform: translate(calc(-50% - 7px),-50%) rotate(var(--a)); }
+    75% { transform: translate(calc(-50% + 7px),-50%) rotate(var(--a)); }
+  }
+
+  /* 胜利弹窗 / 选关弹窗 */
+  #winOverlay, #levelOverlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55);
+  }
+  #winOverlay.hidden, #levelOverlay.hidden { display: none; }
+  .card {
+    background: #20253a; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px;
+    padding: 28px 42px; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: pop .25s ease-out;
+  }
+  .card-scroll { max-height: 78vh; overflow-y: auto; padding: 22px 26px; }
+  #levelGrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+    gap: 8px; max-width: 380px; margin: 16px auto;
+  }
+  #levelGrid button {
+    aspect-ratio: 1 / 1; border-radius: 10px; border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.06); color: #e8eaf0; font-size: 14px; cursor: pointer;
+    transition: background .12s, transform .08s;
+  }
+  #levelGrid button:hover:not(.locked) { background: rgba(255,255,255,0.16); }
+  #levelGrid button.done { background: rgba(46,204,113,0.20); border-color: rgba(46,204,113,0.45); }
+  #levelGrid button.cur { outline: 2px solid rgba(130,220,255,0.9); }
+  #levelGrid button.locked { opacity: 0.38; cursor: default; }
+  @keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .card h2 { margin: 0 0 8px; font-size: 26px; }
+  .card p { margin: 0 0 18px; color: rgba(255,255,255,0.7); }
+  .card .stat { font-size: 20px; color: #7dd3fc; margin: 4px 0 14px; }
+  .card button { font-size: 15px; padding: 9px 22px; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <a class="back" href="../index.html">← 返回大厅</a>
+  <span class="title">🩹 撕胶带</span>
+  <span class="chip" id="levelLabel"></span>
+  <span class="chip" id="tapeLabel"></span>
+  <span class="chip" id="mistakeLabel"></span>
+  <span class="chip" id="bestLabel"></span>
+  <button class="pill" id="hintBtn">💡 提示</button>
+  <button class="pill" id="restartBtn">⟲ 重开</button>
+  <button class="pill" id="levelsBtn">🗺 选关</button>
+  <button class="pill primary" id="nextBtn">下一关 ▶</button>
+</div>
+
+<div id="boardWrap"><div id="board"></div></div>
+<div id="hint">点击最上层、没被压住的胶带 · 被压住的撕不了 · 全撕完即过关</div>
+
+<div id="winOverlay" class="hidden">
+  <div class="card">
+    <h2 id="winTitle">🎉 过关！</h2>
+    <p id="winText"></p>
+    <div class="stat" id="winStat"></div>
+    <button class="pill primary" id="winNext">下一关</button>
+  </div>
+</div>
+
+<div id="levelOverlay" class="hidden">
+  <div class="card card-scroll">
+    <h2>选择关卡</h2>
+    <div id="levelGrid"></div>
+    <button class="pill" id="levelClose">关闭</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ================= 常量 ================= */
+const TAPE_H = 20;              // 胶带高度（逻辑像素）
+const COLORS = [
+  "#f06292", "#4fc3f7", "#66bb6a", "#ffb74d", "#ba68c8", "#ff8a65",
+  "#4dd0e1", "#aed581", "#7986cb", "#ffd54f", "#e57373", "#90a4ae"
+];
+
+/* 关卡：胶带数组（数组下标即层序，越大越靠上）
+   x/y=中心坐标 · a=旋转角(度) · L=长度 · c=颜色下标 */
+const LEVELS = [
+  // 第 1 关 · 教学：一把小扇子，只能从最上面那根撕起
+  [
+    {"x":240,"y":295,"a":0,"L":140,"c":0},
+    {"x":240,"y":285,"a":75,"L":140,"c":1},
+    {"x":240,"y":275,"a":-75,"L":140,"c":2}
+  ],
+  // 第 2 关 · 两团：左右两堆，互不相扰，可自由选择先撕哪堆
+  [
+    {"x":150,"y":315,"a":0,"L":120,"c":3},
+    {"x":150,"y":305,"a":65,"L":120,"c":4},
+    {"x":150,"y":295,"a":-65,"L":120,"c":5},
+    {"x":350,"y":305,"a":-20,"L":120,"c":6},
+    {"x":350,"y":290,"a":15,"L":120,"c":7}
+  ],
+  // 第 3 关 · 双星：左大右小两堆，撕完一堆露另一堆
+  [
+    {"x":165,"y":370,"a":0,"L":130,"c":8},
+    {"x":165,"y":360,"a":60,"L":130,"c":9},
+    {"x":165,"y":350,"a":-60,"L":130,"c":10},
+    {"x":165,"y":340,"a":90,"L":130,"c":11},
+    {"x":325,"y":315,"a":-15,"L":130,"c":0},
+    {"x":325,"y":300,"a":15,"L":130,"c":1},
+    {"x":325,"y":285,"a":-75,"L":130,"c":2}
+  ],
+  // 第 4 关 · 双扇：两把更大的扇子，旋转方向更多样
+  [
+    {"x":160,"y":360,"a":0,"L":140,"c":3},
+    {"x":160,"y":348,"a":58,"L":140,"c":4},
+    {"x":160,"y":336,"a":-58,"L":140,"c":5},
+    {"x":160,"y":324,"a":90,"L":140,"c":6},
+    {"x":160,"y":312,"a":-20,"L":140,"c":7},
+    {"x":330,"y":355,"a":8,"L":140,"c":8},
+    {"x":330,"y":342,"a":70,"L":140,"c":9},
+    {"x":330,"y":329,"a":-70,"L":140,"c":10},
+    {"x":330,"y":316,"a":90,"L":140,"c":11}
+  ],
+  // 第 5 关 · 三星：三堆连环，最上面一层要先撕
+  [
+    {"x":140,"y":420,"a":0,"L":120,"c":0},
+    {"x":140,"y":408,"a":62,"L":120,"c":1},
+    {"x":140,"y":396,"a":-62,"L":120,"c":2},
+    {"x":140,"y":384,"a":90,"L":120,"c":3},
+    {"x":350,"y":420,"a":-10,"L":120,"c":4},
+    {"x":350,"y":408,"a":60,"L":120,"c":5},
+    {"x":350,"y":396,"a":-60,"L":120,"c":6},
+    {"x":350,"y":384,"a":90,"L":120,"c":7},
+    {"x":245,"y":280,"a":0,"L":130,"c":8},
+    {"x":245,"y":268,"a":60,"L":130,"c":9},
+    {"x":245,"y":256,"a":-60,"L":130,"c":10},
+    {"x":245,"y":244,"a":90,"L":130,"c":11}
+  ]
+];
+
+/* ================= 存档 ================= */
+const SAVE_DEFAULTS = { best: null, completed: 0, currentLevel: 0 };
+const save = window.GameSave
+  ? window.GameSave.load('tape-peel', SAVE_DEFAULTS)
+  : Object.assign({}, SAVE_DEFAULTS);
+function persist() {
+  if (window.GameSave) window.GameSave.save('tape-peel', save);
+}
+
+/* ================= 状态 ================= */
+const state = {
+  levelIndex: 0,
+  tapes: [],      // 当前关卡剩余胶带 [{x,y,a,L,c,z,el}]
+  peeled: 0,      // 已撕数量
+  mistakes: 0,    // 失误次数（点了被压住的胶带）
+  start: 0,       // 本关开始时间戳
+  animating: false
+};
+
+/* ================= 几何：旋转矩形 SAT 相交检测 ================= */
+function corners(t) {
+  const rad = t.a * Math.PI / 180, c = Math.cos(rad), s = Math.sin(rad);
+  const hw = t.L / 2, hh = TAPE_H / 2;
+  return [
+    { x: t.x - hw * c + hh * s, y: t.y - hw * s - hh * c },
+    { x: t.x + hw * c + hh * s, y: t.y + hw * s - hh * c },
+    { x: t.x + hw * c - hh * s, y: t.y + hw * s + hh * c },
+    { x: t.x - hw * c - hh * s, y: t.y - hw * s + hh * c }
+  ];
+}
+function overlapOnAxis(a, b, ax) {
+  const pa = corners(a).map(p => p.x * ax.x + p.y * ax.y);
+  const pb = corners(b).map(p => p.x * ax.x + p.y * ax.y);
+  return Math.min.apply(null, pa) <= Math.max.apply(null, pb) &&
+         Math.min.apply(null, pb) <= Math.max.apply(null, pa);
+}
+function rectsOverlap(a, b) {
+  const ra = a.a * Math.PI / 180, rb = b.a * Math.PI / 180;
+  const axes = [
+    { x: Math.cos(ra), y: Math.sin(ra) },
+    { x: -Math.sin(ra), y: Math.cos(ra) },
+    { x: Math.cos(rb), y: Math.sin(rb) },
+    { x: -Math.sin(rb), y: Math.cos(rb) }
+  ];
+  for (let i = 0; i < axes.length; i++) {
+    if (!overlapOnAxis(a, b, axes[i])) return false;
+  }
+  return true;
+}
+// 是否"可撕"：没有任何更高层(更大 z)的胶带与它相交
+function isFree(t) {
+  return !state.tapes.some(u => u.z > t.z && rectsOverlap(t, u));
+}
+
+/* ================= 渲染 ================= */
+function layout() {
+  const wrap = document.getElementById('boardWrap');
+  const availW = wrap.clientWidth - 24;
+  const availH = wrap.clientHeight - 12;
+  const s = Math.max(0.3, Math.min(availW / 480, availH / 520));
+  const board = document.getElementById('board');
+  board.style.width = 480 + 'px';
+  board.style.height = 520 + 'px';
+  board.style.transform = 'scale(' + s + ')';
+}
+window.addEventListener('resize', layout);
+
+function render() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  state.tapes.forEach(function (t) {
+    const el = document.createElement('div');
+    el.className = 'tape free';
+    el.style.left = t.x + 'px';
+    el.style.top = t.y + 'px';
+    el.style.width = t.L + 'px';
+    el.style.height = TAPE_H + 'px';
+    el.style.zIndex = t.z;
+    el.style.setProperty('--a', t.a + 'deg');
+    el.style.background = COLORS[t.c];
+
+    const tab = document.createElement('div');
+    tab.className = 'tab';
+    el.appendChild(tab);
+
+    if (!isFree(t)) { el.classList.remove('free'); el.classList.add('blocked'); }
+
+    t.el = el;   // 关联到 tape 对象，供点击动画使用
+
+    el.addEventListener('click', function () { onTapeClick(t); });
+    board.appendChild(el);
+  });
+}
+
+function updateHUD() {
+  const total = LEVELS[state.levelIndex].length;
+  document.getElementById('levelLabel').textContent = '第 ' + (state.levelIndex + 1) + ' / ' + LEVELS.length + ' 关';
+  document.getElementById('tapeLabel').textContent = '已撕 ' + state.peeled + ' / ' + total;
+  document.getElementById('mistakeLabel').textContent = state.mistakes ? '失误 ' + state.mistakes : '失误 0';
+  document.getElementById('bestLabel').textContent =
+    (save.best == null) ? '最佳 --' : '最佳 ' + formatTime(save.best);
+  const canNext = state.levelIndex < save.completed && state.levelIndex < LEVELS.length - 1;
+  document.getElementById('nextBtn').disabled = !canNext;
+}
+function formatTime(sec) {
+  sec = Math.max(1, Math.round(sec));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m > 0 ? m + '分' + String(s).padStart(2, '0') + '秒' : s + '秒';
+}
+
+function setHint(msg, warn) {
+  const h = document.getElementById('hint');
+  h.textContent = msg;
+  h.classList.toggle('warn', !!warn);
+}
+
+/* ================= 交互 ================= */
+function onTapeClick(t) {
+  if (state.animating) return;
+  if (isFree(t)) {
+    state.animating = true;
+    const el = t.el;
+    el.classList.remove('free', 'blocked');
+    el.classList.add('peeling');
+    setTimeout(function () {
+      state.tapes = state.tapes.filter(function (x) { return x !== t; });
+      state.peeled++;
+      state.animating = false;
+      setHint('点击最上层、没被压住的胶带 · 被压住的撕不了');
+      updateHUD();
+      if (state.tapes.length === 0) { onWin(); }
+      else { render(); }
+    }, 320);
+  } else {
+    state.mistakes++;
+    updateHUD();
+    const el = t.el;
+    el.classList.remove('shake');
+    void el.offsetWidth;               // 重启动画
+    el.classList.add('shake');
+    setTimeout(function () { el.classList.remove('shake'); }, 320);
+    setHint('这张被压住了，撕不了', true);
+  }
+}
+
+function restart() {
+  state.peeled = 0;
+  state.mistakes = 0;
+  state.start = Date.now();
+  state.tapes = LEVELS[state.levelIndex].map(function (td, idx) {
+    return Object.assign({}, td, { z: idx, el: null });
+  });
+  state.animating = false;
+  setHint('点击最上层、没被压住的胶带 · 被压住的撕不了');
+  render();
+  updateHUD();
+}
+
+function loadLevel(i) {
+  state.levelIndex = i;
+  save.currentLevel = i;
+  persist();
+  restart();
+}
+
+/* ================= 过关 ================= */
+function onWin() {
+  const elapsed = Math.max(1, Math.round((Date.now() - state.start) / 1000));
+  const isNewBest = (save.best == null || elapsed < save.best);
+  if (isNewBest) save.best = elapsed;
+  save.completed = Math.max(save.completed, state.levelIndex + 1);
+  save.currentLevel = (state.levelIndex + 1) % LEVELS.length;
+  persist();
+  updateHUD();
+
+  document.getElementById('winText').textContent =
+    (state.levelIndex === LEVELS.length - 1) ? '恭喜，全部关卡已通关！' : '本关用时 ' + formatTime(elapsed) + ' · 失误 ' + state.mistakes;
+  document.getElementById('winStat').textContent =
+    (isNewBest ? '🏆 新纪录！' : '最佳 ') + formatTime(save.best);
+  document.getElementById('winNext').style.display =
+    (state.levelIndex < LEVELS.length - 1) ? '' : 'none';
+  document.getElementById('winOverlay').classList.remove('hidden');
+}
+
+/* ================= 选关弹窗 ================= */
+function openLevels() {
+  const grid = document.getElementById('levelGrid');
+  grid.innerHTML = '';
+  const maxPlayable = Math.max(state.levelIndex, save.completed);
+  for (let i = 0; i < LEVELS.length; i++) {
+    const b = document.createElement('button');
+    b.textContent = i + 1;
+    if (i === state.levelIndex) b.classList.add('cur');
+    if (i < save.completed) b.classList.add('done');
+    if (i > maxPlayable) { b.classList.add('locked'); }
+    else {
+      b.addEventListener('click', (function (idx) {
+        return function () {
+          document.getElementById('levelOverlay').classList.add('hidden');
+          loadLevel(idx);
+        };
+      })(i));
+    }
+    grid.appendChild(b);
+  }
+  document.getElementById('levelOverlay').classList.remove('hidden');
+}
+
+/* ================= 事件绑定 ================= */
+document.getElementById('restartBtn').addEventListener('click', restart);
+document.getElementById('nextBtn').addEventListener('click', function () {
+  if (state.levelIndex < save.completed && state.levelIndex < LEVELS.length - 1) {
+    loadLevel(state.levelIndex + 1);
+  }
+});
+document.getElementById('levelsBtn').addEventListener('click', openLevels);
+document.getElementById('levelClose').addEventListener('click', function () {
+  document.getElementById('levelOverlay').classList.add('hidden');
+});
+document.getElementById('winNext').addEventListener('click', function () {
+  document.getElementById('winOverlay').classList.add('hidden');
+  loadLevel(state.levelIndex + 1);
+});
+document.getElementById('hintBtn').addEventListener('click', function () {
+  state.tapes.forEach(function (t) {
+    if (isFree(t)) {
+      t.el.classList.add('hintflash');
+      setTimeout(function () { t.el.classList.remove('hintflash'); }, 1300);
+    }
+  });
+});
+
+/* ================= 初始化 ================= */
+// 顺序解锁：恢复时夹取到 [0, min(总数-1, completed)]
+const maxUnlocked = Math.min(LEVELS.length - 1, Math.max(0, Number(save.completed) || 0));
+state.levelIndex = Math.max(0, Math.min(Number(save.currentLevel) || 0, maxUnlocked));
+layout();
+restart();
+</script>
+</body>
+</html>
