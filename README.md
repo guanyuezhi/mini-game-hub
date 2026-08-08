@@ -9,8 +9,11 @@ game-hub/
 ├── index.html              # 游戏大厅（卡片列表 + 每游戏最佳纪录）
 ├── save.js                 # 公共存档模块（版本化 localStorage 封装）
 ├── games/
-│   ├── water-sort.html     # 分离流沙（瓶子倒水）· 10 关
+│   ├── water-sort.html     # 分离流沙（瓶子倒水）· 50 关
 │   └── sudoku.html         # 数独 · 10 关
+├── tools/
+│   ├── gen-water-sort-levels.js   # 分离流沙关卡离线生成器（50→500 关扩展入口）
+│   └── verify-water-sort.js       # 分离流沙关卡全量校验
 └── README.md
 ```
 

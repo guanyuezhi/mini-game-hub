@@ -49,11 +49,13 @@
     {
       id: "water-sort", name: "分离流沙", emoji: "🧪", href: "games/water-sort.html",
       desc: "把相同颜色的水倒回同一瓶",
+      total: 50,
       bestText: function (v) { return v == null ? "—" : v + " 步"; }
     },
     {
       id: "sudoku", name: "数独", emoji: "🧩", href: "games/sudoku.html",
       desc: "填入 1-9，使每行每列每宫不重复",
+      total: 10,
       bestText: function (v) { return v == null ? "—" : formatTime(v); }
     }
   ];
@@ -76,7 +78,7 @@
       '<p class="desc">' + g.desc + '</p>' +
       '<div class="stats">' +
         '最佳：' + g.bestText(save.best) + '<br>' +
-        '通关：' + (save.completed || 0) + ' / 10' +
+        '通关：' + (save.completed || 0) + ' / ' + g.total +
       '</div>';
     grid.appendChild(card);
   });

@@ -50,19 +50,33 @@
     font-size: 12px; color: rgba(255,255,255,0.42);
   }
 
-  /* 胜利弹窗 */
-  #winOverlay {
+  /* 胜利弹窗 / 选关弹窗 */
+  #winOverlay, #levelOverlay {
     position: fixed; inset: 0; z-index: 10;
     display: flex; align-items: center; justify-content: center;
     background: rgba(0,0,0,0.55);
   }
-  #winOverlay.hidden { display: none; }
+  #winOverlay.hidden, #levelOverlay.hidden { display: none; }
   .card {
     background: #20253a; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px;
     padding: 28px 42px; text-align: center;
     box-shadow: 0 20px 60px rgba(0,0,0,0.5);
     animation: pop .25s ease-out;
   }
+  .card-scroll { max-height: 78vh; overflow-y: auto; padding: 22px 26px; }
+  #levelGrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+    gap: 8px; max-width: 380px; margin: 16px auto;
+  }
+  #levelGrid button {
+    aspect-ratio: 1 / 1; border-radius: 10px; border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.06); color: #e8eaf0; font-size: 14px; cursor: pointer;
+    transition: background .12s, transform .08s;
+  }
+  #levelGrid button:hover:not(.locked) { background: rgba(255,255,255,0.16); }
+  #levelGrid button.done { background: rgba(46,204,113,0.20); border-color: rgba(46,204,113,0.45); }
+  #levelGrid button.cur { outline: 2px solid rgba(130,220,255,0.9); }
+  #levelGrid button.locked { opacity: 0.38; cursor: default; }
   @keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
   .card h2 { margin: 0 0 8px; font-size: 26px; }
   .card p { margin: 0 0 18px; color: rgba(255,255,255,0.7); }
@@ -78,6 +92,7 @@
   <span class="chip" id="bestLabel"></span>
   <button class="pill" id="undoBtn">↩ 撤销</button>
   <button class="pill" id="restartBtn">⟲ 重开</button>
+  <button class="pill" id="levelsBtn">🗺 选关</button>
   <button class="pill primary" id="nextBtn">下一关 ▶</button>
 </div>
 <canvas id="game"></canvas>
@@ -88,6 +103,14 @@
     <h2 id="winTitle">🎉 过关！</h2>
     <p id="winText"></p>
     <button class="pill primary" id="winNext">下一关</button>
+  </div>
+</div>
+
+<div id="levelOverlay" class="hidden">
+  <div class="card card-scroll">
+    <h2>选择关卡</h2>
+    <div id="levelGrid"></div>
+    <button class="pill" id="levelClose">关闭</button>
   </div>
 </div>
 
@@ -105,20 +128,61 @@ const totalH = GEO.lipH + GEO.neckH + GEO.bodyH;
 
 // 关卡配置：颜色数 / 瓶容量 / 空瓶数 / 随机种子（固定种子保证每关刷新不变）
 const LEVELS = [
-  { colors:2, capacity:4, empty:1, seed:101 },
-  { colors:2, capacity:4, empty:1, seed:102 },
-  { colors:3, capacity:4, empty:1, seed:103 },
-  { colors:3, capacity:4, empty:1, seed:104 },
-  { colors:3, capacity:4, empty:2, seed:105 },
-  { colors:4, capacity:4, empty:2, seed:106 },
-  { colors:4, capacity:4, empty:2, seed:107 },
-  { colors:4, capacity:4, empty:2, seed:108 },
-  { colors:5, capacity:4, empty:2, seed:109 },
-  { colors:5, capacity:4, empty:2, seed:110 },
+  { colors:2, capacity:4, empty:2, seed:5002, minSteps:3, bottles:[[0,1,1,1],[0,0,0,1],[],[]] },
+  { colors:2, capacity:4, empty:2, seed:5003, minSteps:3, bottles:[[1,1,1,0],[0,0,0,1],[],[]] },
+  { colors:2, capacity:4, empty:2, seed:5000, minSteps:5, bottles:[[1,0,1,1],[0,1,0,0],[],[]] },
+  { colors:2, capacity:4, empty:2, seed:5001, minSteps:6, bottles:[[1,0,0,1],[1,0,0,1],[],[]] },
+  { colors:2, capacity:4, empty:1, seed:5502, minSteps:5, bottles:[[0,1,0,0],[1,1,0,1],[]] },
+  { colors:2, capacity:4, empty:1, seed:5503, minSteps:5, bottles:[[1,0,1,0],[0,0,1,1],[]] },
+  { colors:2, capacity:4, empty:1, seed:5500, minSteps:6, bottles:[[0,1,0,1],[1,0,0,1],[]] },
+  { colors:2, capacity:4, empty:1, seed:5501, minSteps:6, bottles:[[1,0,0,1],[1,0,1,0],[]] },
+  { colors:3, capacity:4, empty:2, seed:6000, minSteps:8, bottles:[[2,2,1,1],[0,1,0,1],[0,2,0,2],[],[]] },
+  { colors:3, capacity:4, empty:2, seed:6003, minSteps:8, bottles:[[0,2,1,0],[1,0,2,2],[1,1,2,0],[],[]] },
+  { colors:3, capacity:4, empty:2, seed:6004, minSteps:8, bottles:[[1,1,2,0],[2,2,1,0],[2,0,1,0],[],[]] },
+  { colors:3, capacity:4, empty:2, seed:6001, minSteps:9, bottles:[[0,2,0,2],[2,0,1,2],[1,1,0,1],[],[]] },
+  { colors:3, capacity:4, empty:2, seed:6002, minSteps:9, bottles:[[1,2,2,0],[0,2,1,1],[0,1,2,0],[],[]] },
+  { colors:3, capacity:4, empty:2, seed:6005, minSteps:10, bottles:[[0,1,2,1],[0,2,1,2],[2,0,1,0],[],[]] },
+  { colors:3, capacity:4, empty:1, seed:6500, minSteps:10, bottles:[[1,2,1,1],[0,2,1,0],[0,2,0,2],[]] },
+  { colors:3, capacity:4, empty:1, seed:6501, minSteps:10, bottles:[[2,1,0,2],[1,0,2,0],[2,1,0,1],[]] },
+  { colors:3, capacity:4, empty:1, seed:6502, minSteps:10, bottles:[[1,2,1,0],[1,0,1,2],[2,0,2,0],[]] },
+  { colors:3, capacity:4, empty:1, seed:6505, minSteps:10, bottles:[[2,0,1,2],[1,0,1,1],[2,0,2,0],[]] },
+  { colors:3, capacity:4, empty:1, seed:6503, minSteps:11, bottles:[[1,0,2,0],[2,0,1,2],[1,0,1,2],[]] },
+  { colors:3, capacity:4, empty:1, seed:6504, minSteps:11, bottles:[[2,0,1,0],[2,1,2,1],[0,2,1,0],[]] },
+  { colors:4, capacity:4, empty:2, seed:7000, minSteps:11, bottles:[[0,3,3,2],[1,2,1,0],[0,0,3,1],[1,2,2,3],[],[]] },
+  { colors:4, capacity:4, empty:2, seed:7001, minSteps:11, bottles:[[2,2,3,0],[0,2,3,0],[3,1,1,2],[1,1,0,3],[],[]] },
+  { colors:4, capacity:4, empty:2, seed:7002, minSteps:11, bottles:[[0,3,3,1],[1,0,0,2],[1,2,2,3],[1,0,2,3],[],[]] },
+  { colors:4, capacity:4, empty:2, seed:7003, minSteps:11, bottles:[[0,1,2,3],[3,0,1,2],[1,2,2,0],[3,3,0,1],[],[]] },
+  { colors:4, capacity:4, empty:2, seed:7005, minSteps:12, bottles:[[2,1,0,0],[3,1,3,3],[2,3,2,1],[0,2,0,1],[],[]] },
+  { colors:4, capacity:4, empty:2, seed:7004, minSteps:13, bottles:[[0,3,1,2],[1,3,0,3],[1,2,0,3],[2,0,1,2],[],[]] },
+  { colors:4, capacity:4, empty:2, seed:7006, minSteps:13, bottles:[[3,2,2,1],[3,2,0,2],[0,1,0,1],[3,1,3,0],[],[]] },
+  { colors:4, capacity:4, empty:1, seed:7500, minSteps:12, bottles:[[2,1,3,0],[0,1,0,1],[3,2,2,3],[1,0,2,3],[]] },
+  { colors:4, capacity:4, empty:1, seed:7503, minSteps:12, bottles:[[1,2,3,0],[2,1,2,0],[0,0,3,2],[1,3,3,1],[]] },
+  { colors:4, capacity:4, empty:1, seed:7501, minSteps:13, bottles:[[0,2,3,1],[0,2,3,2],[0,1,1,3],[2,1,0,3],[]] },
+  { colors:4, capacity:4, empty:1, seed:7502, minSteps:13, bottles:[[2,1,0,2],[3,0,3,3],[0,3,1,0],[2,1,2,1],[]] },
+  { colors:4, capacity:4, empty:1, seed:7505, minSteps:13, bottles:[[0,2,3,2],[0,2,0,1],[0,1,1,2],[3,3,1,3],[]] },
+  { colors:4, capacity:4, empty:1, seed:7504, minSteps:14, bottles:[[0,2,0,3],[3,2,1,3],[1,0,3,1],[0,2,1,2],[]] },
+  { colors:5, capacity:4, empty:2, seed:8000, minSteps:14, bottles:[[1,1,4,1],[2,1,3,2],[4,2,3,2],[0,4,0,4],[0,0,3,3],[],[]] },
+  { colors:5, capacity:4, empty:2, seed:8003, minSteps:14, bottles:[[3,3,4,3],[1,4,1,3],[2,0,1,0],[2,2,1,4],[4,2,0,0],[],[]] },
+  { colors:5, capacity:4, empty:2, seed:8006, minSteps:14, bottles:[[4,4,3,3],[0,1,2,4],[2,1,2,1],[4,3,0,3],[0,0,1,2],[],[]] },
+  { colors:5, capacity:4, empty:2, seed:8002, minSteps:16, bottles:[[2,4,4,3],[2,3,0,1],[0,1,4,1],[3,2,3,4],[0,1,2,0],[],[]] },
+  { colors:5, capacity:4, empty:2, seed:8004, minSteps:16, bottles:[[4,3,1,0],[4,1,1,4],[3,1,3,0],[2,3,4,2],[2,0,0,2],[],[]] },
+  { colors:5, capacity:4, empty:2, seed:8005, minSteps:16, bottles:[[0,4,2,1],[3,3,0,4],[4,1,2,1],[4,2,3,2],[0,1,3,0],[],[]] },
+  { colors:5, capacity:4, empty:2, seed:8001, minSteps:17, bottles:[[2,4,1,0],[4,3,1,3],[2,1,0,1],[2,3,4,0],[0,4,3,2],[],[]] },
+  { colors:5, capacity:4, empty:1, seed:8500, minSteps:16, bottles:[[4,3,4,2],[4,1,0,0],[2,3,0,1],[1,0,3,1],[2,3,2,4],[]] },
+  { colors:5, capacity:4, empty:1, seed:8501, minSteps:16, bottles:[[2,0,4,1],[4,2,1,3],[2,2,0,3],[4,0,3,4],[1,0,3,1],[]] },
+  { colors:5, capacity:4, empty:1, seed:8502, minSteps:16, bottles:[[1,4,2,0],[3,4,3,2],[1,3,1,0],[4,0,2,3],[0,1,4,2],[]] },
+  { colors:5, capacity:4, empty:1, seed:8503, minSteps:16, bottles:[[1,2,2,1],[2,0,3,0],[3,0,4,3],[1,2,1,4],[0,4,3,4],[]] },
+  { colors:5, capacity:4, empty:1, seed:8504, minSteps:16, bottles:[[3,4,0,4],[0,0,1,2],[0,2,3,2],[1,4,3,2],[3,1,4,1],[]] },
+  { colors:5, capacity:4, empty:1, seed:8505, minSteps:18, bottles:[[0,2,0,1],[3,0,4,2],[3,4,3,1],[0,2,1,2],[4,1,3,4],[]] },
+  { colors:6, capacity:4, empty:2, seed:9003, minSteps:17, bottles:[[2,1,5,0],[4,3,0,0],[3,5,2,1],[2,4,4,5],[0,3,2,5],[1,1,4,3],[],[]] },
+  { colors:6, capacity:4, empty:2, seed:9000, minSteps:18, bottles:[[2,5,1,0],[0,5,5,4],[1,3,2,1],[3,3,4,2],[4,1,2,5],[0,4,3,0],[],[]] },
+  { colors:6, capacity:4, empty:2, seed:9001, minSteps:18, bottles:[[0,2,1,4],[2,1,3,3],[4,1,5,0],[1,0,0,5],[2,4,5,3],[4,3,5,2],[],[]] },
+  { colors:6, capacity:4, empty:2, seed:9002, minSteps:18, bottles:[[1,3,1,0],[5,2,4,5],[3,4,0,5],[4,3,3,0],[0,2,2,1],[5,4,2,1],[],[]] },
 ];
 
 /* ================= 存档（接入 game-hub/save.js，key: "water-sort"） =================
-   顶层字段：best(最短步数,number|null)、completed(已通关数 0-10)、currentLevel(当前关卡索引) */
+   顶层字段：best(最短步数,number|null)、completed(已通关数 0-50)、currentLevel(当前关卡索引)
+   注：关卡布局已离线固化（见 LEVELS），运行时零生成零 BFS，刷新秒开。 */
 const SAVE_DEFAULTS = { best: null, completed: 0, currentLevel: 0 };
 const save = window.GameSave ? window.GameSave.load('water-sort', SAVE_DEFAULTS)
                              : Object.assign({}, SAVE_DEFAULTS);
@@ -131,6 +195,7 @@ function persist(){
 const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d');
 const winOverlay = document.getElementById('winOverlay');
+const levelOverlay = document.getElementById('levelOverlay');
 
 /* ================= 游戏状态 ================= */
 const state = {
@@ -142,16 +207,6 @@ let dpr = 1;
 let anim = null;      // {i,k,color,amount,srcBefore,dstBefore,dir,t0,dur,t}
 let flash = null;     // 错误闪烁
 let winVisible = false;
-
-/* ================= 伪随机（可复现关卡） ================= */
-function mulberry32(a){
-  return function(){
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /* ================= 纯逻辑（状态 + 合法性 + 胜利） ================= */
 function topBlock(bottle){
@@ -195,87 +250,11 @@ function segmentsOf(bottle){
 }
 function segSum(segs){ return segs.reduce((a,s) => a + s.units, 0); }
 
-/* ================= BFS 求解器（用于关卡可解性校验） ================= */
-function isSolvable(start, cap, nodeLimit){
-  const key = b => b.map(x => x.join(',')).join('|');
-  if(isSolved(start, cap)) return true;
-  const seen = new Set([key(start)]);
-  const q = [start.map(x => x.slice())];
-  let nodes = 0;
-  while(q.length){
-    if(++nodes > nodeLimit) return false;      // 超出预算视为不可解，重新生成
-    const cur = q.shift();
-    for(let i = 0; i < cur.length; i++){
-      const src = cur[i];
-      if(!src.length) continue;
-      const tb = topBlock(src);
-      for(let k = 0; k < cur.length; k++){
-        if(i === k) continue;
-        const dst = cur[k];
-        if(dst.length >= cap) continue;
-        if(dst.length && dst[dst.length-1] !== tb.color) continue;
-        const n = Math.min(tb.size, cap - dst.length);
-        // 先只构造新状态 key（不复制整表，省内存）
-        const parts = [];
-        for(let j = 0; j < cur.length; j++){
-          if(j === i) parts.push(src.slice(0, src.length - n).join(','));
-          else if(j === k) parts.push(dst.concat(Array(n).fill(tb.color)).join(','));
-          else parts.push(cur[j].join(','));
-        }
-        const kk = parts.join('|');
-        if(seen.has(kk)) continue;
-        const nb = cur.map(x => x.slice());
-        const s = nb[i], d = nb[k];
-        for(let x = 0; x < n; x++){ s.pop(); d.push(tb.color); }
-        if(isSolved(nb, cap)) return true;
-        seen.add(kk);
-        q.push(nb);
-      }
-    }
-  }
-  return false;
-}
-
-/* ================= 关卡生成（随机分布 + 求解器验证，保证可解） =================
-   先把所有色块打乱，随机分进瓶子，再用 BFS 确认可解、且非「已通关」状态。 */
-function generateLevel(cfg, attempt){
-  if(attempt === undefined) attempt = 0;
-  const rng = mulberry32(cfg.seed + attempt * 13);
-  const cap = cfg.capacity;
-
-  // 打乱全部色块
-  const units = [];
-  for(let c = 0; c < cfg.colors; c++) for(let x = 0; x < cap; x++) units.push(c);
-  for(let i = units.length - 1; i > 0; i--){
-    const j = Math.floor(rng() * (i + 1));
-    const t = units[i]; units[i] = units[j]; units[j] = t;
-  }
-
-  // 随机分装进前 colors 个瓶（每瓶 1..cap 个），其余留空
-  const total = cfg.colors * cap;
-  const bottles = [];
-  let idx = 0;
-  for(let b = 0; b < cfg.colors; b++){
-    const remBottles = cfg.colors - b;
-    const min = Math.max(1, total - idx - (remBottles - 1) * cap);
-    const max = Math.min(cap, total - idx - (remBottles - 1));
-    const count = min + Math.floor(rng() * (max - min + 1));
-    bottles.push(units.slice(idx, idx + count));
-    idx += count;
-  }
-  for(let e = 0; e < cfg.empty; e++) bottles.push([]);
-
-  // 质量门槛：非「已通关」且可解
-  if(isSolved(bottles, cap)) return generateLevel(cfg, attempt + 1);
-  if(!isSolvable(bottles, cap, 120000)) return generateLevel(cfg, attempt + 1);
-  return bottles;
-}
-
 /* ================= 关卡控制 ================= */
 function loadLevel(){
   const cfg = LEVELS[state.levelIndex];
   state.capacity = cfg.capacity;
-  state.bottles = generateLevel(cfg);
+  state.bottles = cfg.bottles.map(b => b.slice());
   state.initial = state.bottles.map(b => b.slice());
   state.moves = 0; state.history = []; state.selected = -1; anim = null; flash = null;
   hideWin();
@@ -292,6 +271,32 @@ function nextLevel(){
   // 顺序解锁：仅当前关已通关且非最后一关时才可进入下一关
   if(!(state.levelIndex < save.completed && state.levelIndex < LEVELS.length - 1)) return;
   state.levelIndex = state.levelIndex + 1;
+  loadLevel();
+}
+function openLevels(){
+  const grid = document.getElementById('levelGrid');
+  grid.innerHTML = '';
+  // 已解锁：已通关的关 + 当前关（顺序解锁下当前关恒 <= completed）
+  const maxPlayable = Math.max(state.levelIndex, save.completed);
+  for(let i = 0; i < LEVELS.length; i++){
+    const b = document.createElement('button');
+    b.textContent = i + 1;
+    const unlocked = i <= maxPlayable;
+    if(!unlocked){ b.classList.add('locked'); b.textContent = '🔒'; }
+    if(i < save.completed) b.classList.add('done');
+    if(i === state.levelIndex) b.classList.add('cur');
+    if(unlocked) b.addEventListener('click', function(){ gotoLevel(i); });
+    grid.appendChild(b);
+  }
+  levelOverlay.classList.remove('hidden');
+}
+function closeLevels(){
+  levelOverlay.classList.add('hidden');
+}
+function gotoLevel(i){
+  state.levelIndex = i;
+  hideWin();
+  closeLevels();
   loadLevel();
 }
 function undo(){
@@ -608,7 +613,7 @@ function showWin(){
   const last = state.levelIndex === LEVELS.length - 1;
   document.getElementById('winTitle').textContent = last ? '🎉 全部通关！' : '🎉 过关！';
   document.getElementById('winText').textContent = '用了 ' + state.moves + ' 步完成本关';
-  document.getElementById('winNext').textContent = last ? '再来一轮' : '下一关';
+  document.getElementById('winNext').textContent = last ? '返回选关' : '下一关';
   // 写入存档：completed 取已通关最大关卡数，best 取最小步数
   save.completed = Math.max(save.completed, state.levelIndex + 1);
   save.best = (save.best == null) ? state.moves : Math.min(save.best, state.moves);
@@ -626,15 +631,17 @@ function hideWin(){
 document.getElementById('undoBtn').addEventListener('click', undo);
 document.getElementById('restartBtn').addEventListener('click', restart);
 document.getElementById('nextBtn').addEventListener('click', nextLevel);
+document.getElementById('levelsBtn').addEventListener('click', openLevels);
+document.getElementById('levelClose').addEventListener('click', closeLevels);
 document.getElementById('winNext').addEventListener('click', function(){
-  // 最后一关按钮为「再来一轮」→ 重玩本关；其余按顺序解锁进入下一关
-  if(state.levelIndex === LEVELS.length - 1) restart();
+  // 最后一关按钮为「返回选关」；其余按顺序解锁进入下一关
+  if(state.levelIndex === LEVELS.length - 1){ hideWin(); openLevels(); }
   else nextLevel();
 });
 cvs.addEventListener('pointerdown', onPointer);
 window.addEventListener('resize', resize);
 resize();
-// 顺序解锁：恢复时夹取到 [0, min(9, completed)]，completed=0 时强制从第 1 关开始
+// 顺序解锁：恢复时夹取到 [0, min(49, completed)]，completed=0 时强制从第 1 关开始
 const maxUnlocked = Math.min(LEVELS.length - 1, Math.max(0, Number(save.completed) || 0));
 state.levelIndex = Math.max(0, Math.min(Number(save.currentLevel) || 0, maxUnlocked));
 loadLevel();
