@@ -369,25 +369,49 @@ function buildBoard() {
     (function (idx) {
       div.addEventListener("click", function () { onReveal(idx); });
       div.addEventListener("contextmenu", function (e) { e.preventDefault(); onFlag(idx); });
-      // 移动端长按（~300ms）插旗；提前抬起或明显位移（想滚动页面）则取消。
-      // 注意：位移必须超过阈值才取消——手指按住时的轻微抖动会触发 touchmove，
-      // 若无条件取消，手机上长按几乎永远无法触发。
-      let lpTimer = null, lpStart = null;
+      // 移动端长按（~300ms）插旗。判定基于「按住时长 + 位移」：
+      //  - touchmove 只有位移超过阈值（用户想滚动页面）才取消，轻微抖动不误杀；
+      //  - touchend 时若定时器被系统干扰未触发，但按住够久且位移不大，补偿插旗
+      //    （兼容微信等内置浏览器长按手势被系统接管的情况）。
+      const LP_DIST = 16, LP_MS = 300, LP_MIN_MS = 220;
+      let lpTimer = null, lpStart = null, lpStartT = 0, lpFired = false;
+      function fireFlag() {
+        if (lpFired) return;
+        lpFired = true;
+        if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+        onFlag(idx);
+        suppressClick(idx);
+      }
       div.addEventListener("touchstart", function (e) {
         if (state.over) return;
         const t = e.touches[0];
         lpStart = { x: t.clientX, y: t.clientY };
-        lpTimer = setTimeout(function () { onFlag(idx); suppressClick(idx); lpTimer = null; }, 300);
+        lpStartT = Date.now();
+        lpFired = false;
+        lpTimer = setTimeout(fireFlag, LP_MS);
       }, { passive: true });
       div.addEventListener("touchmove", function (e) {
-        if (!lpTimer || !lpStart) return;
+        if (lpFired || !lpTimer || !lpStart) return;
         const t = e.touches[0];
-        if (Math.abs(t.clientX - lpStart.x) > 12 || Math.abs(t.clientY - lpStart.y) > 12) {
+        if (Math.abs(t.clientX - lpStart.x) > LP_DIST || Math.abs(t.clientY - lpStart.y) > LP_DIST) {
           clearTimeout(lpTimer); lpTimer = null;
         }
       }, { passive: true });
-      div.addEventListener("touchend", function () { if (lpTimer) clearTimeout(lpTimer); });
-      div.addEventListener("touchcancel", function () { if (lpTimer) clearTimeout(lpTimer); });
+      div.addEventListener("touchend", function (e) {
+        if (!lpFired && lpStart && lpTimer === null && Date.now() - lpStartT >= LP_MIN_MS) {
+          const ct = e.changedTouches && e.changedTouches[0];
+          if (ct && Math.abs(ct.clientX - lpStart.x) <= LP_DIST && Math.abs(ct.clientY - lpStart.y) <= LP_DIST) {
+            fireFlag();
+          }
+        }
+        if (lpTimer) clearTimeout(lpTimer);
+        lpTimer = null;
+      });
+      div.addEventListener("touchcancel", function () {
+        lpFired = true;
+        if (lpTimer) clearTimeout(lpTimer);
+        lpTimer = null;
+      });
     })(i);
     boardEl.appendChild(div);
     cells.push(div);
