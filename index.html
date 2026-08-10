@@ -14,20 +14,31 @@
   header { text-align: center; margin-bottom: 36px; }
   header h1 { font-size: 2rem; letter-spacing: 2px; }
   header p { color: #94a3b8; margin-top: 8px; }
+  #tabs {
+    display: flex; justify-content: center; gap: 10px; margin-bottom: 22px;
+  }
+  #tabs .tab {
+    padding: 8px 20px; font-size: 14px; cursor: pointer;
+    border-radius: 999px; border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.06); color: #94a3b8;
+    transition: background .15s, color .15s;
+  }
+  #tabs .tab:hover { background: rgba(255,255,255,.12); }
+  #tabs .tab.active { background: rgba(80,170,255,.18); border-color: rgba(80,170,255,.5); color: #e2e8f0; }
   #grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 20px; max-width: 900px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 14px; max-width: 860px; margin: 0 auto;
   }
   .card {
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
-    border-radius: 14px; padding: 24px; text-decoration: none; color: inherit;
+    border-radius: 12px; padding: 14px 12px; text-decoration: none; color: inherit;
     transition: transform .15s ease, box-shadow .15s ease; display: block;
   }
   .card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
-  .card .emoji { font-size: 2.4rem; }
-  .card h2 { margin: 12px 0 6px; font-size: 1.2rem; }
-  .card p.desc { color: #94a3b8; font-size: .85rem; min-height: 2.4em; }
-  .card .stats { margin-top: 14px; font-size: .85rem; color: #7dd3fc; line-height: 1.7; }
+  .card .emoji { font-size: 1.8rem; }
+  .card h2 { margin: 8px 0 4px; font-size: 1rem; }
+  .card p.desc { color: #94a3b8; font-size: .75rem; min-height: 2.6em; line-height: 1.45; }
+  .card .stats { margin-top: 8px; font-size: .72rem; color: #7dd3fc; line-height: 1.6; }
   footer { text-align: center; color: #475569; margin-top: 40px; font-size: .8rem; }
 </style>
 </head>
@@ -36,6 +47,10 @@
   <h1>🎮 轻量游戏合集</h1>
   <p>和朋友随时开玩 · 进度自动保存在本地浏览器</p>
 </header>
+<nav id="tabs">
+  <button class="tab active" data-cat="classic">🕹️ 传统小游戏</button>
+  <button class="tab" data-cat="trendy">✨ 新潮小游戏</button>
+</nav>
 <main id="grid"></main>
 <footer>本地离线运行 · localStorage 存档 · 数据不出浏览器</footer>
 
@@ -44,92 +59,89 @@
   // 公共存档模块兜底：save.js 加载失败时大厅仍可渲染
   var GameSave = window.GameSave || { load: function () { return {}; }, save: function () { return false; } };
 
-  // 游戏注册表：新增游戏时在此登记
+  // 游戏注册表：新增游戏时在此登记；cat: classic=传统 / trendy=近年兴起
   var GAMES = [
     {
       id: "water-sort", name: "瓶子倒水", emoji: "🧪", href: "games/water-sort.html",
       desc: "把相同颜色的水倒回同一瓶",
-      total: 50,
-      bestText: null  // 不追踪最短步数，大厅不展示「最佳」行
+      total: 50, cat: "trendy"
     },
     {
       id: "sudoku", name: "数独", emoji: "🧩", href: "games/sudoku.html",
       desc: "填入 1-9，使每行每列每宫不重复",
-      total: 10,
-      bestText: function (v) { return v == null ? "—" : formatTime(v); }
+      total: 10, cat: "classic"
     },
     {
       id: "2048", name: "2048", emoji: "🎮", href: "games/2048.html",
       desc: "滑动数字方块，两两合并成更大的数",
-      total: 10,
-      bestText: function (v) { return v == null || v === 0 ? "—" : "最高分 " + v; }
+      total: 10, cat: "classic"
     },
     {
       id: "minesweeper", name: "扫雷", emoji: "💣", href: "games/minesweeper.html",
       desc: "翻开方块，避开地雷，用数字推理",
-      total: 10,
-      bestText: function (v) { return v == null ? "—" : formatTime(v); }
+      total: 10, cat: "classic"
     },
     {
       id: "lights-out", name: "熄灯", emoji: "💡", href: "games/lights-out.html",
       desc: "点击方格翻转十字灯，把所有灯熄灭",
-      total: 10,
-      bestText: function (v) { return v == null ? "—" : (v <= 0 ? "达成最优" : "超最优 " + v + " 次"); }
+      total: 10, cat: "classic"
     },
     {
       id: "puzzle-15", name: "15 拼图", emoji: "🔢", href: "games/puzzle-15.html",
       desc: "滑动方块，把数字按顺序排好",
-      total: 10,
-      bestText: function (v) { return v == null ? "—" : (v <= 0 ? "达成最优" : "超最优 " + v + " 步"); }
+      total: 10, cat: "classic"
     },
     {
       id: "mastermind", name: "猜数字", emoji: "🎯", href: "games/mastermind.html",
       desc: "根据黑白反馈破译隐藏的颜色密码",
-      total: 10,
-      bestText: function (v) { return v == null ? "—" : "最少 " + v + " 次猜中"; }
+      total: 10, cat: "classic"
     },
     {
       id: "nonogram", name: "数织", emoji: "🖼️", href: "games/nonogram.html",
       desc: "按行列数字提示，推理涂出隐藏图案",
-      total: 12,
-      bestText: null
+      total: 12, cat: "classic"
     },
     {
       id: "pipes", name: "水管连接", emoji: "🔧", href: "games/pipes.html",
       desc: "旋转管道，让所有水路接通成一个网络",
-      total: 12,
-      bestText: null
+      total: 12, cat: "classic"
     },
     {
       id: "rush-hour", name: "华容道·塞车", emoji: "🚗", href: "games/rush-hour.html",
       desc: "滑动车辆腾出通道，让红色小车驶出",
-      total: 12,
-      bestText: function (v) { return v == null ? "—" : (v <= 0 ? "达成最优" : "超最优 " + v + " 步"); }
+      total: 12, cat: "classic"
     }
   ];
 
-  function formatTime(sec) {
-    sec = Math.round(sec);
-    var m = Math.floor(sec / 60), s = sec % 60;
-    return m > 0 ? m + "分" + String(s).padStart(2, "0") + "秒" : s + "秒";
+  var grid = document.getElementById("grid");
+  var activeCat = "classic";
+
+  function renderCards() {
+    grid.innerHTML = "";
+    GAMES.filter(function (g) { return g.cat === activeCat; }).forEach(function (g) {
+      var save = GameSave.load(g.id, {});
+      var card = document.createElement("a");
+      card.className = "card";
+      card.href = g.href;
+      card.innerHTML =
+        '<div class="emoji">' + g.emoji + '</div>' +
+        '<h2>' + g.name + '</h2>' +
+        '<p class="desc">' + g.desc + '</p>' +
+        '<div class="stats">通关：' + (save.completed || 0) + ' / ' + g.total + '</div>';
+      grid.appendChild(card);
+    });
   }
 
-  var grid = document.getElementById("grid");
-  GAMES.forEach(function (g) {
-    var save = GameSave.load(g.id, {});
-    var card = document.createElement("a");
-    card.className = "card";
-    card.href = g.href;
-    var statsHtml = '';
-    if (g.bestText) statsHtml += '最佳：' + g.bestText(save.best) + '<br>';
-    statsHtml += '通关：' + (save.completed || 0) + ' / ' + g.total;
-    card.innerHTML =
-      '<div class="emoji">' + g.emoji + '</div>' +
-      '<h2>' + g.name + '</h2>' +
-      '<p class="desc">' + g.desc + '</p>' +
-      '<div class="stats">' + statsHtml + '</div>';
-    grid.appendChild(card);
+  document.querySelectorAll("#tabs .tab").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      activeCat = btn.getAttribute("data-cat");
+      document.querySelectorAll("#tabs .tab").forEach(function (b) {
+        b.classList.toggle("active", b === btn);
+      });
+      renderCards();
+    });
   });
+  renderCards();
 </script>
 </body>
 </html>

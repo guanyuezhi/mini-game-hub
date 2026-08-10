@@ -148,6 +148,7 @@
     <p class="hl" id="modalText"></p>
     <div class="actions">
       <button id="modalReplayBtn" class="primary">重新开始</button>
+      <button id="lobbyBtn">🏠 返回大厅</button>
     </div>
   </div>
 </div>
@@ -560,6 +561,9 @@ document.getElementById('modalReplayBtn').addEventListener('click', function () 
 });
 document.getElementById('milestoneClose').addEventListener('click', function () {
   document.getElementById('milestoneToast').classList.add('hidden');
+});
+document.getElementById('lobbyBtn').addEventListener('click', function () {
+  location.href = '../index.html';
 });
 window.addEventListener('resize', layout);
 

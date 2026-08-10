@@ -5,10 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="color-scheme" content="dark">
 <title>猜数字 · 轻量游戏合集</title>
-<!-- 大厅注册信息（index.html GAMES 表新增项，勿改本文件外的代码）：
-     { id:"mastermind", name:"猜数字", emoji:"🎯", href:"games/mastermind.html",
-       desc:"根据黑白反馈破译隐藏的颜色密码", total:10,
-       bestText: function(v){ return v == null ? "—" : "最少 " + v + " 次猜中"; } } -->
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -119,6 +115,25 @@
   }
   .modal-box button.primary { background: #0284c7; border-color: #0284c7; color: #fff; font-weight: 600; }
   .modal-box button:hover { filter: brightness(1.12); }
+
+  #levelOverlay {
+    position: fixed; inset: 0; z-index: 11;
+    background: rgba(2, 6, 23, .72);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #levelOverlay.hidden { display: none; }
+  #levelGrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    gap: 8px; max-width: 340px; margin: 16px auto;
+  }
+  #levelGrid button {
+    aspect-ratio: 1 / 1; border-radius: 8px; border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.06); color: #e2e8f0; font-size: 14px; cursor: pointer;
+  }
+  #levelGrid button:hover:not(.locked) { background: rgba(255,255,255,.16); }
+  #levelGrid button.done { background: rgba(46,204,113,.20); border-color: rgba(46,204,113,.45); }
+  #levelGrid button.cur { outline: 2px solid rgba(130,220,255,.9); }
+  #levelGrid button.locked { opacity: .38; cursor: default; }
 </style>
 </head>
 <body>
@@ -127,6 +142,7 @@
   <div class="top">
     <span id="levelLabel">第 1 / 10 关</span>
     <span id="remainLabel">剩余 7 次</span>
+    <span id="devBadge" style="display:none; color:#ffd166; background:rgba(255,209,102,0.12); border:1px solid rgba(255,209,102,0.45); padding:2px 8px; border-radius:999px; font-size:12px;">DEV</span>
   </div>
 </header>
 
@@ -144,6 +160,7 @@
   <button id="prevBtn">上一关</button>
   <button id="restartBtn">重开本关</button>
   <button id="nextBtn">下一关</button>
+  <button id="levelsBtn">🗺 选关</button>
 </div>
 
 <div class="hint">先点位置再选颜色 · 黑点=位置颜色都对 · 白点=颜色对但位置错</div>
@@ -155,6 +172,18 @@
     <div class="actions">
       <button id="modalReplayBtn">重玩本关</button>
       <button id="modalNextBtn" class="primary">下一关 →</button>
+      <button id="lobbyBtn">🏠 返回大厅</button>
+    </div>
+  </div>
+</div>
+
+<div id="levelOverlay" class="hidden">
+  <div class="modal-box" style="max-height:78vh; overflow-y:auto;">
+    <h2>选择关卡</h2>
+    <div id="levelGrid"></div>
+    <div style="display:flex; justify-content:center; gap:10px; margin-top:14px;">
+      <button id="devToggle">🔧 开发者模式：关</button>
+      <button id="levelClose">关闭</button>
     </div>
   </div>
 </div>
@@ -314,8 +343,14 @@ var won = false;
 var saved = GameSave.load('mastermind', { completed: 0, currentLevel: 0, best: null });
 if (typeof saved.completed === 'number') completed = saved.completed;
 if (typeof saved.best === 'number') best = saved.best;
+// 开发者模式：URL ?dev=1 或 localStorage（选关弹窗内可切换）
+var DEV_KEY = 'game-hub:mastermind:dev';
+var devMode = new URLSearchParams(location.search).get('dev') === '1';
+if (!devMode) {
+  try { devMode = localStorage.getItem(DEV_KEY) === '1'; } catch (e) {}
+}
 currentLevel = Math.min(Math.max(saved.currentLevel || 0, 0), TOTAL - 1);
-if (currentLevel > completed) currentLevel = completed; // 防数据不一致
+if (!devMode && currentLevel > completed) currentLevel = completed; // 防数据不一致
 
 /* ================= 关卡 ================= */
 function loadLevel(idx) {
@@ -420,7 +455,53 @@ function updateHud() {
 
 function updateButtons() {
   document.getElementById('prevBtn').disabled = currentLevel <= 0;
-  document.getElementById('nextBtn').disabled = !(currentLevel < TOTAL - 1 && currentLevel < completed);
+  var canNext = devMode ? currentLevel < TOTAL - 1 : (currentLevel < TOTAL - 1 && currentLevel < completed);
+  document.getElementById('nextBtn').disabled = !canNext;
+}
+
+/* ================= 开发者模式 / 选关 ================= */
+function setDevMode(on) {
+  devMode = on;
+  try { localStorage.setItem(DEV_KEY, on ? '1' : '0'); } catch (e) {}
+  updateDevUI();
+  if (!document.getElementById('levelOverlay').classList.contains('hidden')) openLevels();
+}
+function updateDevUI() {
+  var badge = document.getElementById('devBadge');
+  if (badge) badge.style.display = devMode ? 'inline-block' : 'none';
+  var t = document.getElementById('devToggle');
+  if (t) {
+    t.textContent = devMode ? '🔧 开发者模式：开' : '🔧 开发者模式：关';
+    t.classList.toggle('primary', devMode);
+  }
+  updateButtons();
+}
+function openLevels() {
+  var grid = document.getElementById('levelGrid');
+  grid.innerHTML = '';
+  var maxPlayable = devMode ? TOTAL - 1 : Math.max(currentLevel, completed);
+  for (var i = 0; i < TOTAL; i++) {
+    var b = document.createElement('button');
+    b.textContent = i + 1;
+    var unlocked = i <= maxPlayable;
+    if (!unlocked) { b.classList.add('locked'); b.textContent = '🔒'; }
+    if (i < completed) b.classList.add('done');
+    if (i === currentLevel) b.classList.add('cur');
+    if (unlocked) {
+      (function (idx) { b.addEventListener('click', function () { gotoLevel(idx); }); })(i);
+    }
+    grid.appendChild(b);
+  }
+  document.getElementById('levelOverlay').classList.remove('hidden');
+}
+function closeLevels() {
+  document.getElementById('levelOverlay').classList.add('hidden');
+}
+function gotoLevel(i) {
+  currentLevel = i;
+  hideModal();
+  closeLevels();
+  loadLevel(i);
 }
 
 /* ================= 交互 ================= */
@@ -520,6 +601,10 @@ document.getElementById('modalNextBtn').addEventListener('click', function () {
   hideModal();
   goNext();
 });
+document.getElementById('levelsBtn').addEventListener('click', openLevels);
+document.getElementById('levelClose').addEventListener('click', closeLevels);
+document.getElementById('devToggle').addEventListener('click', function () { setDevMode(!devMode); });
+document.getElementById('lobbyBtn').addEventListener('click', function () { location.href = '../index.html'; });
 
 /* ================= 导出（verify 用） ================= */
 window.__game = {
@@ -530,6 +615,7 @@ window.__game = {
 };
 
 /* ================= 启动 ================= */
+updateDevUI();
 loadLevel(currentLevel);
 </script>
 </body>

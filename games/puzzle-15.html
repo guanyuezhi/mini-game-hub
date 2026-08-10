@@ -90,6 +90,25 @@
   }
   .modal-box button.primary { background: #0284c7; border-color: #0284c7; color: #fff; font-weight: 600; }
   .modal-box button:hover { filter: brightness(1.12); }
+
+  #levelOverlay {
+    position: fixed; inset: 0; z-index: 11;
+    background: rgba(2, 6, 23, .72);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #levelOverlay.hidden { display: none; }
+  #levelGrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    gap: 8px; max-width: 340px; margin: 16px auto;
+  }
+  #levelGrid button {
+    aspect-ratio: 1 / 1; border-radius: 8px; border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.06); color: #e2e8f0; font-size: 14px; cursor: pointer;
+  }
+  #levelGrid button:hover:not(.locked) { background: rgba(255,255,255,.16); }
+  #levelGrid button.done { background: rgba(46,204,113,.20); border-color: rgba(46,204,113,.45); }
+  #levelGrid button.cur { outline: 2px solid rgba(130,220,255,.9); }
+  #levelGrid button.locked { opacity: .38; cursor: default; }
 </style>
 </head>
 <body>
@@ -99,15 +118,18 @@
     <span class="title">🔢 15 拼图</span>
     <span id="levelLabel">第 1 / 10 关</span>
     <span id="moveLabel">步数 0</span>
+    <span id="devBadge" style="display:none; color:#ffd166; background:rgba(255,209,102,0.12); border:1px solid rgba(255,209,102,0.45); padding:2px 8px; border-radius:999px; font-size:12px;">DEV</span>
   </div>
 </header>
 
 <main id="board"></main>
 
 <div id="controls">
+  <button id="undoBtn">↩ 撤销</button>
   <button id="prevBtn">上一关</button>
   <button id="restartBtn">重开本关</button>
   <button id="nextBtn">下一关</button>
+  <button id="levelsBtn">🗺 选关</button>
 </div>
 
 <div class="hint">点击空格旁的方块 · 数字按顺序排好（空格在末尾）即过关 · 用最少步数即为最优</div>
@@ -120,6 +142,18 @@
     <div class="actions">
       <button id="modalReplayBtn">重玩本关</button>
       <button id="modalNextBtn" class="primary">下一关 →</button>
+      <button id="lobbyBtn">🏠 返回大厅</button>
+    </div>
+  </div>
+</div>
+
+<div id="levelOverlay" class="hidden">
+  <div class="modal-box" style="max-height:78vh; overflow-y:auto;">
+    <h2>选择关卡</h2>
+    <div id="levelGrid"></div>
+    <div style="display:flex; justify-content:center; gap:10px; margin-top:14px;">
+      <button id="devToggle">🔧 开发者模式：关</button>
+      <button id="levelClose">关闭</button>
     </div>
   </div>
 </div>
@@ -166,13 +200,20 @@ let currentSize = 3;
 let tiles = [];
 let moves = 0;
 let winVisible = false;
+let history = [];      // 撤销栈：每次滑动前的 {tiles, moves} 快照
 
 // ---------- 读存档 ----------
 const saved = GameSave.load("puzzle-15", { best: null, completed: 0, currentLevel: 0 });
 if (typeof saved.best === "number") best = saved.best;
 if (typeof saved.completed === "number") completed = saved.completed;
+// 开发者模式：URL ?dev=1 或 localStorage（选关弹窗内可切换）
+const DEV_KEY = 'game-hub:puzzle-15:dev';
+let devMode = new URLSearchParams(location.search).get('dev') === '1';
+if (!devMode) {
+  try { devMode = localStorage.getItem(DEV_KEY) === '1'; } catch (e) {}
+}
 currentLevel = Math.min(Math.max(saved.currentLevel || 0, 0), TOTAL - 1);
-if (currentLevel > completed) currentLevel = completed; // 顺序解锁防越界
+if (!devMode && currentLevel > completed) currentLevel = completed; // 顺序解锁防越界
 
 // ================= 纯函数（导出给 verify 复用） =================
 
@@ -230,6 +271,7 @@ function loadLevel(idx) {
   tiles = lv.tiles.slice();
   moves = 0;
   winVisible = false;
+  history = [];
   buildBoard(currentSize);
   levelLabel.textContent = "第 " + (idx + 1) + " / " + TOTAL + " 关";
   updateHud();
@@ -240,6 +282,7 @@ function restart() {
   tiles = LEVELS[currentLevel].tiles.slice();
   moves = 0;
   winVisible = false;
+  history = [];
   updateHud();
   render();
 }
@@ -251,11 +294,23 @@ function goPrev() { loadLevel(Math.max(currentLevel - 1, 0)); }
 function onTap(idx) {
   if (winVisible) return;
   if (!canSlide(tiles, currentSize, idx)) return;
+  history.push({ tiles: tiles.slice(), moves: moves });
   tiles = slide(tiles, currentSize, idx);
   moves++; // slide 为纯函数，这里计 1 步
   updateHud();
   render();
   if (isSolved(tiles, currentSize)) win();
+}
+
+function undo() {
+  if (!history.length) return;
+  const snap = history.pop();
+  tiles = snap.tiles;
+  moves = snap.moves;
+  winVisible = false;
+  document.getElementById('modal').classList.add('hidden');
+  updateHud();
+  render();
 }
 
 // ================= 渲染 =================
@@ -275,7 +330,51 @@ function updateHud() {
 
 function updateButtons() {
   document.getElementById("prevBtn").disabled = currentLevel <= 0;
-  document.getElementById("nextBtn").disabled = !(currentLevel < TOTAL - 1 && currentLevel < completed);
+  const canNext = devMode ? currentLevel < TOTAL - 1 : (currentLevel < TOTAL - 1 && currentLevel < completed);
+  document.getElementById("nextBtn").disabled = !canNext;
+}
+
+/* ================= 开发者模式 / 选关 ================= */
+function setDevMode(on) {
+  devMode = on;
+  try { localStorage.setItem(DEV_KEY, on ? '1' : '0'); } catch (e) {}
+  updateDevUI();
+  if (!document.getElementById('levelOverlay').classList.contains('hidden')) openLevels();
+}
+function updateDevUI() {
+  const badge = document.getElementById('devBadge');
+  if (badge) badge.style.display = devMode ? 'inline-block' : 'none';
+  const t = document.getElementById('devToggle');
+  if (t) {
+    t.textContent = devMode ? '🔧 开发者模式：开' : '🔧 开发者模式：关';
+    t.classList.toggle('primary', devMode);
+  }
+  updateButtons();
+}
+function openLevels() {
+  const grid = document.getElementById('levelGrid');
+  grid.innerHTML = '';
+  const maxPlayable = devMode ? TOTAL - 1 : Math.max(currentLevel, completed);
+  for (let i = 0; i < TOTAL; i++) {
+    const b = document.createElement('button');
+    b.textContent = i + 1;
+    const unlocked = i <= maxPlayable;
+    if (!unlocked) { b.classList.add('locked'); b.textContent = '🔒'; }
+    if (i < completed) b.classList.add('done');
+    if (i === currentLevel) b.classList.add('cur');
+    if (unlocked) b.addEventListener('click', function () { gotoLevel(i); });
+    grid.appendChild(b);
+  }
+  document.getElementById('levelOverlay').classList.remove('hidden');
+}
+function closeLevels() {
+  document.getElementById('levelOverlay').classList.add('hidden');
+}
+function gotoLevel(i) {
+  currentLevel = i;
+  document.getElementById('modal').classList.add('hidden');
+  closeLevels();
+  loadLevel(i);
 }
 
 // ================= 胜利 =================
@@ -318,6 +417,11 @@ document.getElementById("modalNextBtn").addEventListener("click", function () {
   document.getElementById("modal").classList.add("hidden");
   goNext();
 });
+document.getElementById("undoBtn").addEventListener("click", undo);
+document.getElementById("levelsBtn").addEventListener("click", openLevels);
+document.getElementById("levelClose").addEventListener("click", closeLevels);
+document.getElementById("devToggle").addEventListener("click", function () { setDevMode(!devMode); });
+document.getElementById("lobbyBtn").addEventListener("click", function () { location.href = '../index.html'; });
 
 document.addEventListener("keydown", function (e) {
   const modalHidden = document.getElementById("modal").classList.contains("hidden");
@@ -329,6 +433,7 @@ document.addEventListener("keydown", function (e) {
 });
 
 // ================= 启动 =================
+updateDevUI();
 loadLevel(currentLevel);
 
 // ================= 导出（verify-puzzle15.js 复用） =================

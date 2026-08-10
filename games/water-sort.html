@@ -103,6 +103,7 @@
     <h2 id="winTitle">🎉 过关！</h2>
     <p id="winText"></p>
     <button class="pill primary" id="winNext">下一关</button>
+    <button class="pill" id="lobbyBtn">🏠 返回大厅</button>
   </div>
 </div>
 
@@ -673,6 +674,7 @@ document.getElementById('winNext').addEventListener('click', function(){
   if(state.levelIndex === LEVELS.length - 1){ hideWin(); openLevels(); }
   else nextLevel();
 });
+document.getElementById('lobbyBtn').addEventListener('click', function(){ location.href = '../index.html'; });
 cvs.addEventListener('pointerdown', onPointer);
 window.addEventListener('resize', resize);
 resize();

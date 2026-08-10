@@ -89,6 +89,25 @@
   }
   .modal-box button.primary { background: #0284c7; border-color: #0284c7; color: #fff; font-weight: 600; }
   .modal-box button:hover { filter: brightness(1.12); }
+
+  #levelOverlay {
+    position: fixed; inset: 0; z-index: 11;
+    background: rgba(2, 6, 23, .72);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #levelOverlay.hidden { display: none; }
+  #levelGrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    gap: 8px; max-width: 340px; margin: 16px auto;
+  }
+  #levelGrid button {
+    aspect-ratio: 1 / 1; border-radius: 8px; border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.06); color: #e2e8f0; font-size: 14px; cursor: pointer;
+  }
+  #levelGrid button:hover:not(.locked) { background: rgba(255,255,255,.16); }
+  #levelGrid button.done { background: rgba(46,204,113,.20); border-color: rgba(46,204,113,.45); }
+  #levelGrid button.cur { outline: 2px solid rgba(130,220,255,.9); }
+  #levelGrid button.locked { opacity: .38; cursor: default; }
 </style>
 </head>
 <body>
@@ -99,6 +118,7 @@
     <span id="levelLabel">第 1 / 10 关</span>
     <span id="mineLabel">💣 0</span>
     <span id="timer">00:00</span>
+    <span id="devBadge" style="display:none; color:#ffd166; background:rgba(255,209,102,0.12); border:1px solid rgba(255,209,102,0.45); padding:2px 8px; border-radius:999px; font-size:12px;">DEV</span>
   </div>
 </header>
 
@@ -106,6 +126,7 @@
   <button id="prevBtn">上一关</button>
   <button id="restartBtn">重开本关</button>
   <button id="nextBtn">下一关</button>
+  <button id="levelsBtn">🗺 选关</button>
 </div>
 
 <main id="board"></main>
@@ -119,6 +140,18 @@
     <div class="actions">
       <button id="modalReplayBtn">重玩本关</button>
       <button id="modalNextBtn" class="primary">下一关 →</button>
+      <button id="lobbyBtn">🏠 返回大厅</button>
+    </div>
+  </div>
+</div>
+
+<div id="levelOverlay" class="hidden">
+  <div class="modal-box" style="max-height:78vh; overflow-y:auto;">
+    <h2>选择关卡</h2>
+    <div id="levelGrid"></div>
+    <div style="display:flex; justify-content:center; gap:10px; margin-top:14px;">
+      <button id="devToggle">🔧 开发者模式：关</button>
+      <button id="levelClose">关闭</button>
     </div>
   </div>
 </div>
@@ -262,8 +295,14 @@ function reveal(board, idx) {
 const saved = GameSave.load("minesweeper", { best: null, completed: 0, currentLevel: 0 });
 if (typeof saved.best === "number") best = saved.best;
 if (typeof saved.completed === "number") completed = saved.completed;
+// 开发者模式：URL ?dev=1 或 localStorage（选关弹窗内可切换）
+const DEV_KEY = 'game-hub:minesweeper:dev';
+let devMode = new URLSearchParams(location.search).get('dev') === '1';
+if (!devMode) {
+  try { devMode = localStorage.getItem(DEV_KEY) === '1'; } catch (e) {}
+}
 currentLevel = Math.min(Math.max(saved.currentLevel || 0, 0), TOTAL - 1);
-if (currentLevel > completed) currentLevel = completed; // 顺序解锁夹取到 [0, min(TOTAL-1, completed)]
+if (!devMode && currentLevel > completed) currentLevel = completed; // 顺序解锁夹取到 [0, min(TOTAL-1, completed)]
 
 function saveProgress() {
   GameSave.save("minesweeper", { best: best, completed: completed, currentLevel: currentLevel });
@@ -330,13 +369,23 @@ function buildBoard() {
     (function (idx) {
       div.addEventListener("click", function () { onReveal(idx); });
       div.addEventListener("contextmenu", function (e) { e.preventDefault(); onFlag(idx); });
-      // 移动端长按（~300ms）插旗；滚动/提前抬起则取消
-      let lpTimer = null;
-      div.addEventListener("touchstart", function () {
+      // 移动端长按（~300ms）插旗；提前抬起或明显位移（想滚动页面）则取消。
+      // 注意：位移必须超过阈值才取消——手指按住时的轻微抖动会触发 touchmove，
+      // 若无条件取消，手机上长按几乎永远无法触发。
+      let lpTimer = null, lpStart = null;
+      div.addEventListener("touchstart", function (e) {
         if (state.over) return;
-        lpTimer = setTimeout(function () { onFlag(idx); suppressClick(idx); }, 300);
+        const t = e.touches[0];
+        lpStart = { x: t.clientX, y: t.clientY };
+        lpTimer = setTimeout(function () { onFlag(idx); suppressClick(idx); lpTimer = null; }, 300);
       }, { passive: true });
-      div.addEventListener("touchmove", function () { if (lpTimer) clearTimeout(lpTimer); });
+      div.addEventListener("touchmove", function (e) {
+        if (!lpTimer || !lpStart) return;
+        const t = e.touches[0];
+        if (Math.abs(t.clientX - lpStart.x) > 12 || Math.abs(t.clientY - lpStart.y) > 12) {
+          clearTimeout(lpTimer); lpTimer = null;
+        }
+      }, { passive: true });
       div.addEventListener("touchend", function () { if (lpTimer) clearTimeout(lpTimer); });
       div.addEventListener("touchcancel", function () { if (lpTimer) clearTimeout(lpTimer); });
     })(i);
@@ -389,7 +438,51 @@ function updateMineLabel() {
 
 function updateButtons() {
   document.getElementById("prevBtn").disabled = currentLevel <= 0;
-  document.getElementById("nextBtn").disabled = !(currentLevel < TOTAL - 1 && currentLevel < completed);
+  const canNext = devMode ? currentLevel < TOTAL - 1 : (currentLevel < TOTAL - 1 && currentLevel < completed);
+  document.getElementById("nextBtn").disabled = !canNext;
+}
+
+/* ================= 开发者模式 / 选关 ================= */
+function setDevMode(on) {
+  devMode = on;
+  try { localStorage.setItem(DEV_KEY, on ? '1' : '0'); } catch (e) {}
+  updateDevUI();
+  if (!document.getElementById('levelOverlay').classList.contains('hidden')) openLevels();
+}
+function updateDevUI() {
+  const badge = document.getElementById('devBadge');
+  if (badge) badge.style.display = devMode ? 'inline-block' : 'none';
+  const t = document.getElementById('devToggle');
+  if (t) {
+    t.textContent = devMode ? '🔧 开发者模式：开' : '🔧 开发者模式：关';
+    t.classList.toggle('primary', devMode);
+  }
+  updateButtons();
+}
+function openLevels() {
+  const grid = document.getElementById('levelGrid');
+  grid.innerHTML = '';
+  const maxPlayable = devMode ? TOTAL - 1 : Math.max(currentLevel, completed);
+  for (let i = 0; i < TOTAL; i++) {
+    const b = document.createElement('button');
+    b.textContent = i + 1;
+    const unlocked = i <= maxPlayable;
+    if (!unlocked) { b.classList.add('locked'); b.textContent = '🔒'; }
+    if (i < completed) b.classList.add('done');
+    if (i === currentLevel) b.classList.add('cur');
+    if (unlocked) b.addEventListener('click', function () { gotoLevel(i); });
+    grid.appendChild(b);
+  }
+  document.getElementById('levelOverlay').classList.remove('hidden');
+}
+function closeLevels() {
+  document.getElementById('levelOverlay').classList.add('hidden');
+}
+function gotoLevel(i) {
+  currentLevel = i;
+  hideModal();
+  closeLevels();
+  loadLevel(i);
 }
 
 function updateHud() {
@@ -495,8 +588,13 @@ document.getElementById("modalNextBtn").addEventListener("click", function () {
   hideModal();
   goNext();
 });
+document.getElementById("levelsBtn").addEventListener("click", openLevels);
+document.getElementById("levelClose").addEventListener("click", closeLevels);
+document.getElementById("devToggle").addEventListener("click", function () { setDevMode(!devMode); });
+document.getElementById("lobbyBtn").addEventListener("click", function () { location.href = '../index.html'; });
 
 /* ================= 启动 ================= */
+updateDevUI();
 loadLevel(currentLevel);
 
 /* ================= 导出（供 verify 使用，纯逻辑无 DOM） ================= */
