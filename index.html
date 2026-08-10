@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>轻量游戏合集</title>
+<title>小游戏大厅</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -40,11 +40,18 @@
   .card p.desc { color: #94a3b8; font-size: .75rem; min-height: 2.6em; line-height: 1.45; }
   .card .stats { margin-top: 8px; font-size: .72rem; color: #7dd3fc; line-height: 1.6; }
   footer { text-align: center; color: #475569; margin-top: 40px; font-size: .8rem; }
+  #refreshBtn {
+    margin-left: 10px; padding: 4px 14px; cursor: pointer; vertical-align: middle;
+    border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
+    background: rgba(255,255,255,.06); color: #94a3b8; font-size: .75rem;
+    transition: background .15s, color .15s;
+  }
+  #refreshBtn:hover { background: rgba(255,255,255,.14); color: #e2e8f0; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🎮 轻量游戏合集</h1>
+  <h1>🎮 小游戏大厅</h1>
   <p>和朋友随时开玩 · 进度自动保存在本地浏览器</p>
 </header>
 <nav id="tabs">
@@ -52,10 +59,15 @@
   <button class="tab" data-cat="trendy">✨ 新潮小游戏</button>
 </nav>
 <main id="grid"></main>
-<footer>本地离线运行 · localStorage 存档 · 数据不出浏览器 · <span id="ver">v2026.08.10</span></footer>
+<footer>本地离线运行 · localStorage 存档 · 数据不出浏览器 · <span id="ver">v<span id="verNum"></span></span>
+  <button id="refreshBtn" type="button" title="清缓存并强制拉取最新版">🔄 强制刷新</button></footer>
 
 <script src="save.js"></script>
 <script>
+  // 发版版本号：格式 vYYYY.MM.DD.N（日期 + 同日序号）。发版时只改这里，
+  // 页脚展示与游戏链接 ?v= 缓存失效都取它，保证三处一致。
+  var VERSION = "2026.08.10.1";
+
   // 公共存档模块兜底：save.js 加载失败时大厅仍可渲染
   var GameSave = window.GameSave || { load: function () { return {}; }, save: function () { return false; } };
 
@@ -122,7 +134,7 @@
       var save = GameSave.load(g.id, {});
       var card = document.createElement("a");
       card.className = "card";
-      card.href = g.href;
+      card.href = g.href + "?v=" + VERSION; // 版本号拼进 URL，发版后自动失效浏览器缓存
       card.innerHTML =
         '<div class="emoji">' + g.emoji + '</div>' +
         '<h2>' + g.name + '</h2>' +
@@ -142,6 +154,19 @@
     });
   });
   renderCards();
+  document.getElementById("verNum").textContent = VERSION;
+
+  // 强制刷新：清掉 Cache API / service worker 缓存，再用时间戳参数绕过 HTTP 缓存重拉最新 index.html
+  document.getElementById("refreshBtn").addEventListener("click", function () {
+    if (window.caches && window.caches.keys) {
+      caches.keys().then(function (keys) {
+        keys.forEach(function (k) { caches.delete(k); });
+      }).catch(function () {});
+    }
+    var u = new URL(location.href);
+    u.searchParams.set("_t", Date.now().toString());
+    location.href = u.toString();
+  });
 </script>
 </body>
 </html>
