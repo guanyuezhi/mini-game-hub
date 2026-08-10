@@ -46,12 +46,16 @@
 
   #board {
     display: grid; width: min(94vw, 460px);
+    aspect-ratio: 1 / 1; /* 所有关卡均为方形棋盘：高=宽；配合 minmax(0,1fr) 行高固定，旗子 emoji 不会撑高行 */
     border: 3px solid #64748b; border-radius: 8px; overflow: hidden;
     background: #0f172a;
   }
   .cell {
     display: flex; align-items: center; justify-content: center;
     aspect-ratio: 1 / 1;
+    min-width: 0; /* 防止内容（旗子/数字）撑宽轨道，避免大棋盘最后一列被 overflow:hidden 裁掉 */
+    overflow: hidden; /* 内容超出格子时内部裁剪，避免旗子/数字撑破网格出现缝隙 */
+    line-height: 1;   /* 收紧 emoji 行盒，减少内容对行高的影响 */
     font-size: clamp(11px, 4.2vw, 20px); font-weight: 700;
     color: #e2e8f0; cursor: pointer;
     background: #1e293b;
@@ -435,7 +439,8 @@ function goNext() { loadLevel(Math.min(currentLevel + 1, TOTAL - 1)); }
 function buildBoard() {
   boardEl.innerHTML = "";
   cells = [];
-  boardEl.style.gridTemplateColumns = "repeat(" + state.c + ", 1fr)";
+  boardEl.style.gridTemplateColumns = "repeat(" + state.c + ", minmax(0, 1fr))";
+  boardEl.style.gridTemplateRows = "repeat(" + state.r + ", minmax(0, 1fr))";
   const r = state.r, c = state.c;
   for (let i = 0; i < r * c; i++) {
     const div = document.createElement("div");
@@ -446,8 +451,14 @@ function buildBoard() {
       div.addEventListener("click", function () { onReveal(idx); });
       div.addEventListener("contextmenu", function (e) {
         e.preventDefault();
-        // 微信等内置浏览器长按后约 500ms 会补发 contextmenu；
-        // 若 touch 长按已插旗，再 toggle 会立刻取消 → 短时间内已插过旗则忽略
+        // 本格刚由长按插旗（fireFlag）触发过：浏览器长按后会补发 contextmenu，
+        // 再 toggle 会把刚插上的旗取消。按住特别久时补发可能晚到，因此用 2s 的
+        // per-cell 标记覆盖，而不是只依赖全局时间窗。
+        if (div._lpFlaggedAt && Date.now() - div._lpFlaggedAt < 2000) {
+          div._lpFlaggedAt = 0;
+          return;
+        }
+        // 其它格子：短时间（800ms）内有过长按插旗也忽略，兼容多格连续长按
         if (Date.now() - lastTouchFlagAt < 800) return;
         onFlag(idx);
       });
@@ -462,6 +473,7 @@ function buildBoard() {
         lpFired = true;
         if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
         onFlag(idx);
+        div._lpFlaggedAt = Date.now(); // 标记本格已由长按插旗，抑制浏览器补发的 contextmenu
         lastTouchFlagAt = Date.now();
         suppressClick(idx);
       }
