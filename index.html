@@ -66,7 +66,7 @@
 <script>
   // 发版版本号：格式 vYYYY.MM.DD.N（日期 + 同日序号）。发版时只改这里，
   // 页脚展示与游戏链接 ?v= 缓存失效都取它，保证三处一致。
-  var VERSION = "2026.08.10.1";
+  var VERSION = "2026.08.10.2";
 
   // 公共存档模块兜底：save.js 加载失败时大厅仍可渲染
   var GameSave = window.GameSave || { load: function () { return {}; }, save: function () { return false; } };
@@ -91,7 +91,7 @@
     {
       id: "minesweeper", name: "扫雷", emoji: "💣", href: "games/minesweeper.html",
       desc: "翻开方块，避开地雷，用数字推理",
-      total: 10, cat: "classic"
+      total: 30, cat: "classic"
     },
     {
       id: "lights-out", name: "熄灯", emoji: "💡", href: "games/lights-out.html",

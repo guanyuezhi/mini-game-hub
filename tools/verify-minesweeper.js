@@ -6,6 +6,7 @@
  *  3) 每个非雷格 nums 值 = 实际邻雷数（独立计数校验）
  * 并对 reveal 做冒烟：首点 flood-fill 返回集合、不含雷格。
  * 用法: node tools/verify-minesweeper.js
+ * 说明：游戏运行时每局随机种子（LEVELS 不再含 seed），verify 用固定测试种子保持校验确定。
  */
 'use strict';
 const fs = require('fs');
@@ -18,6 +19,9 @@ const js = m[1];
 
 // ---- DOM 桩（共享 _dom_stub，跳过 save.js 与内联脚本的 DOM 调用） ----
 const stub = require('./_dom_stub');
+
+// 固定测试种子（游戏实际每局随机，这里用常量保证校验可复现）
+const TEST_SEED = 12345;
 
 const fn = new Function('document', 'window', 'requestAnimationFrame', 'performance', 'location', 'localStorage',
   js + '; return window.__game;');
@@ -43,7 +47,7 @@ const LEVELS = api.LEVELS;
 for (let li = 0; li < LEVELS.length; li++) {
   const cfg = LEVELS[li];
   const fr = Math.floor(cfg.r / 2), fc = Math.floor(cfg.c / 2);
-  const board = api.genBoard(cfg.r, cfg.c, cfg.mines, cfg.seed, fr, fc);
+  const board = api.genBoard(cfg.r, cfg.c, cfg.mines, TEST_SEED, fr, fc);
 
   // 1) 雷数一致
   const mineCountOk = board.mines.size === cfg.mines;

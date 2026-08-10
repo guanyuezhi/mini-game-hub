@@ -82,7 +82,7 @@
   .modal-box h2 { font-size: 1.55rem; margin-bottom: 10px; }
   .modal-box p { color: #94a3b8; margin: 6px 0; font-size: 15px; }
   .modal-box p.win-time { color: #7dd3fc; }
-  .modal-box .actions { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+  .modal-box .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 18px; }
   .modal-box button {
     flex: 1; padding: 11px 0; font-size: 15px; cursor: pointer;
     border-radius: 999px; border: 1px solid rgba(255,255,255,.12);
@@ -116,7 +116,7 @@
   <a class="back" href="../index.html">← 返回大厅</a>
   <span class="title">💣 扫雷</span>
   <div class="top">
-    <span id="levelLabel">第 1 / 10 关</span>
+    <span id="levelLabel">第 1 / 30 关</span>
     <span id="mineLabel">💣 0</span>
     <span id="timer">00:00</span>
     <span id="devBadge" style="display:none; color:#ffd166; background:rgba(255,209,102,0.12); border:1px solid rgba(255,209,102,0.45); padding:2px 8px; border-radius:999px; font-size:12px;">DEV</span>
@@ -133,13 +133,14 @@
 
 <main id="board"></main>
 
-<div class="hint">左键翻开 · 右键 / 长按插旗 · 或用「🚩 插旗模式」点击插旗 · 数字表示周围雷数</div>
+<div class="hint">左键翻开 · 右键 / 长按插旗 · 或用「🚩 插旗模式」点击插旗 · 数字表示周围雷数 · 每局随机布雷 · 踩雷可撤销 3 次</div>
 
 <div id="modal" class="hidden">
   <div class="modal-box">
     <h2 id="modalTitle">🎉 过关！</h2>
     <p class="win-time" id="modalTime"></p>
     <div class="actions">
+      <button id="modalUndoBtn" class="primary" style="display:none;">↩ 撤销</button>
       <button id="modalReplayBtn">重玩本关</button>
       <button id="modalNextBtn" class="primary">下一关 →</button>
       <button id="lobbyBtn">🏠 返回大厅</button>
@@ -162,19 +163,41 @@
 'use strict';
 
 /* ================= 常量 ================= */
-// 10 关难度递增：行 / 列 / 雷数 / 固定种子（布雷确定性）
-const TOTAL = 10;
+// 30 关难度递增：行 / 列 / 雷数（9×9 → 18×18，雷密度约 10%→18%）
+// 关卡只定义「尺寸 + 雷数」难度档；布雷种子每局随机（loadLevel 时生成），
+// 盘面动态生成、永不重复（不再写死固定种子）。
+const TOTAL = 30;
 const LEVELS = [
-  { r: 9,  c: 9,  mines: 8,  seed: 5001 },
-  { r: 9,  c: 9,  mines: 10, seed: 5002 },
-  { r: 12, c: 12, mines: 15, seed: 5003 },
-  { r: 12, c: 12, mines: 20, seed: 5004 },
-  { r: 14, c: 14, mines: 25, seed: 5005 },
-  { r: 14, c: 14, mines: 30, seed: 5006 },
-  { r: 16, c: 16, mines: 35, seed: 5007 },
-  { r: 16, c: 16, mines: 40, seed: 5008 },
-  { r: 16, c: 16, mines: 45, seed: 5009 },
-  { r: 18, c: 18, mines: 55, seed: 5010 }
+  { r: 9,  c: 9,  mines: 8 },
+  { r: 9,  c: 9,  mines: 9 },
+  { r: 9,  c: 9,  mines: 10 },
+  { r: 10, c: 10, mines: 12 },
+  { r: 10, c: 10, mines: 14 },
+  { r: 11, c: 11, mines: 14 },
+  { r: 11, c: 11, mines: 17 },
+  { r: 12, c: 12, mines: 15 },
+  { r: 12, c: 12, mines: 18 },
+  { r: 12, c: 12, mines: 20 },
+  { r: 13, c: 13, mines: 21 },
+  { r: 13, c: 13, mines: 25 },
+  { r: 14, c: 14, mines: 25 },
+  { r: 14, c: 14, mines: 28 },
+  { r: 14, c: 14, mines: 30 },
+  { r: 15, c: 15, mines: 30 },
+  { r: 15, c: 15, mines: 34 },
+  { r: 16, c: 16, mines: 35 },
+  { r: 16, c: 16, mines: 38 },
+  { r: 16, c: 16, mines: 40 },
+  { r: 16, c: 16, mines: 43 },
+  { r: 16, c: 16, mines: 45 },
+  { r: 17, c: 17, mines: 45 },
+  { r: 17, c: 17, mines: 48 },
+  { r: 18, c: 18, mines: 48 },
+  { r: 18, c: 18, mines: 52 },
+  { r: 18, c: 18, mines: 55 },
+  { r: 18, c: 18, mines: 56 },
+  { r: 18, c: 18, mines: 57 },
+  { r: 18, c: 18, mines: 58 }
 ];
 
 // 数字着色（深色主题适配：7 用浅色替代黑色保证可读）
@@ -194,7 +217,7 @@ const timerEl = document.getElementById("timer");
 
 /* ================= 游戏状态 ================= */
 const state = {
-  r: 9, c: 9, mineCount: 8, seed: 5001,
+  r: 9, c: 9, mineCount: 8, seed: 0,   // seed 每局随机（loadLevel 生成）
   board: null,     // 首点后由 genBoard 生成：{mines:Set, nums:Int8Array, r, c}
   revealed: [],    // 布尔：是否已翻开
   flags: [],       // 布尔：是否插旗
@@ -212,6 +235,8 @@ let timerId = null;
 let longPress = { idx: -1, t: 0 }; // 长按插旗后抑制随后触发的 click
 let lastTouchFlagAt = 0;           // touch 长按最近插旗时间，用于抑制系统补发的 contextmenu
 let flagMode = false;              // 插旗模式：点击=插旗/拔旗，不翻开
+let undoLeft = 3;                  // 每关可撤销次数（踩雷失败时救回）
+let lastSnapshot = null;           // 最近一次翻开前的状态快照（撤销用）
 
 /* ================= 纯逻辑（供 verify 导出） ================= */
 // mulberry32：固定种子的确定性伪随机数生成器
@@ -323,13 +348,16 @@ function resetTimer() {
   timerId = null;
   timerEl.textContent = "00:00";
 }
-function startTimer() {
-  if (timerId) clearInterval(timerId);
-  startTime = Date.now();
-  timerEl.textContent = "00:00";
+function runTimerFrom(ts) {
+  startTime = ts;
+  timerEl.textContent = fmt(Math.floor((Date.now() - startTime) / 1000));
   timerId = setInterval(function () {
     timerEl.textContent = fmt(Math.floor((Date.now() - startTime) / 1000));
   }, 250);
+}
+function startTimer() {
+  if (timerId) clearInterval(timerId);
+  runTimerFrom(Date.now());
 }
 function stopTimer() {
   if (timerId) clearInterval(timerId);
@@ -339,15 +367,59 @@ function elapsedSeconds() {
   return Math.max(1, Math.floor((Date.now() - startTime) / 1000));
 }
 
+/* ================= 撤销（踩雷救回） ================= */
+function snapshot() {
+  return {
+    revealed: state.revealed.slice(),
+    flags: state.flags.slice(),
+    started: state.started,
+    board: state.board,
+    over: state.over,
+    won: state.won,
+    boomIdx: state.boomIdx,
+    startTime: startTime
+  };
+}
+function restoreSnapshot(s) {
+  stopTimer();
+  state.revealed = s.revealed;
+  state.flags = s.flags;
+  state.started = s.started;
+  state.board = s.board;
+  state.over = s.over;
+  state.won = s.won;
+  state.boomIdx = s.boomIdx;
+  if (s.started && !s.over) {
+    runTimerFrom(s.startTime);
+  } else {
+    timerEl.textContent = "00:00";
+  }
+}
+// 踩雷失败弹窗「撤销」：恢复翻开前状态，并把踩中的雷格自动插旗标记
+function undoMineClick() {
+  if (undoLeft <= 0 || !lastSnapshot) return;
+  const s = lastSnapshot;
+  const mineIdx = state.boomIdx;
+  undoLeft--;
+  lastSnapshot = null;
+  restoreSnapshot(s);
+  if (mineIdx >= 0) state.flags[mineIdx] = true;
+  render();
+  hideModal();
+}
+
 /* ================= 关卡控制 ================= */
 function loadLevel(idx) {
   currentLevel = idx;
   const cfg = LEVELS[idx];
-  state.r = cfg.r; state.c = cfg.c; state.mineCount = cfg.mines; state.seed = cfg.seed;
+  state.r = cfg.r; state.c = cfg.c; state.mineCount = cfg.mines;
+  state.seed = (Math.random() * 0x100000000) >>> 0; // 每局随机种子 → 盘面动态生成
   state.board = null;
   state.revealed = new Array(cfg.r * cfg.c).fill(false);
   state.flags = new Array(cfg.r * cfg.c).fill(false);
   state.started = false; state.over = false; state.won = false; state.boomIdx = -1;
+  undoLeft = 3;
+  lastSnapshot = null;
   resetTimer();
   hideModal();
   buildBoard();
@@ -540,6 +612,9 @@ function onReveal(idx) {
   if (state.revealed[idx]) return;
   if (state.flags[idx]) return;
 
+  // 记录本次翻开前的状态快照（踩雷时用于撤销救回）
+  lastSnapshot = snapshot();
+
   // 首点：此刻才布雷（首点安全），并开始计时
   if (!state.started) {
     state.started = true;
@@ -613,11 +688,20 @@ function showWin(t) {
   document.getElementById("modalReplayBtn").textContent = "重玩本关";
   document.getElementById("modalNextBtn").textContent = "下一关 →";
   document.getElementById("modalNextBtn").style.display = isLast ? "none" : "";
+  document.getElementById("modalUndoBtn").style.display = "none";
   document.getElementById("modal").classList.remove("hidden");
 }
 function showLose() {
   document.getElementById("modalTitle").textContent = "💥 踩雷了";
-  document.getElementById("modalTime").textContent = "本关雷区已全部亮出，再试一次";
+  const undoBtn = document.getElementById("modalUndoBtn");
+  if (undoLeft > 0 && lastSnapshot) {
+    undoBtn.style.display = "";
+    undoBtn.textContent = "↩ 撤销（剩 " + undoLeft + " 次）";
+    document.getElementById("modalTime").textContent = "踩到雷了，可撤销这步继续玩";
+  } else {
+    undoBtn.style.display = "none";
+    document.getElementById("modalTime").textContent = "本关雷区已全部亮出，再试一次";
+  }
   document.getElementById("modalReplayBtn").textContent = "再试一次";
   document.getElementById("modalNextBtn").style.display = "none";
   document.getElementById("modal").classList.remove("hidden");
@@ -629,6 +713,7 @@ document.getElementById("prevBtn").addEventListener("click", goPrev);
 document.getElementById("restartBtn").addEventListener("click", restart);
 document.getElementById("nextBtn").addEventListener("click", goNext);
 
+document.getElementById("modalUndoBtn").addEventListener("click", undoMineClick);
 document.getElementById("modalReplayBtn").addEventListener("click", function () {
   hideModal();
   restart();
